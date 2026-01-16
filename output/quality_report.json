@@ -1,0 +1,79 @@
+{
+  "timestamp": "2026-01-13T20:31:51.360678",
+  "dataset": {
+    "path": "dataset",
+    "total_images": 700,
+    "num_classes": 2,
+    "class_distribution": {
+      "defocused_blurred": 350,
+      "motion_blurred": 350
+    }
+  },
+  "metrics": {
+    "blur": {
+      "mean": 108.4235605009908,
+      "std": 295.27576378846067,
+      "min": 1.7883965489715323,
+      "max": 5466.459950396359,
+      "median": 48.89008743312037
+    },
+    "noise": {
+      "mean": 3.40308677155612,
+      "std": 2.116696344627891,
+      "min": 0.6426628916939554,
+      "max": 25.56354873224575,
+      "median": 2.9576537782683516
+    },
+    "brightness": {
+      "mean": 119.56964983996502,
+      "std": 32.14992912016278,
+      "min": 12.981273651123047,
+      "max": 207.8850253423055,
+      "median": 121.97962532707186
+    },
+    "contrast": {
+      "mean": 53.15416458863977,
+      "std": 15.648467119816372,
+      "min": 8.860880023201602,
+      "max": 92.66938427428643,
+      "median": 53.226759712342755
+    },
+    "saturation": {
+      "mean": 67.68107930617687,
+      "std": 37.34431182373564,
+      "min": 1.3541158711080585,
+      "max": 218.984083819826,
+      "median": 60.124874909718834
+    },
+    "edge_density": {
+      "mean": 14.896725700764735,
+      "std": 7.067894941275733,
+      "min": 3.389411181417735,
+      "max": 90.97597468997616,
+      "median": 13.648290587800865
+    },
+    "corruption": {
+      "corrupted_count": 0,
+      "corrupted_percentage": 0.0
+    }
+  },
+  "agent_analysis": {
+    "summary": "Detected 1 issue(s):\n  1. [HIGH] 72.3% of images are blurry (506/700)\n",
+    "issues": [
+      {
+        "type": "blur",
+        "severity": "high",
+        "description": "72.3% of images are blurry (506/700)"
+      }
+    ],
+    "decisions": [
+      "72% images are blurry → recommend denoising"
+    ],
+    "recommendations": [
+      "Apply denoising filter to blurry images"
+    ]
+  },
+  "fixes": {
+    "images_fixed": 0
+  }
+}

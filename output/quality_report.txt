@@ -1,0 +1,59 @@
+================================================================================
+AGENTIC DATA QUALITY AUDITOR FOR COMPUTER VISION
+================================================================================
+Generated: 2026-01-13 20:31:51
+
+DATASET SUMMARY
+--------------------------------------------------------------------------------
+Dataset Path: dataset
+Total Images: 700
+Number of Classes: 2
+
+CLASS DISTRIBUTION
+--------------------------------------------------------------------------------
+  defocused_blurred: 350 images (50.0%)
+  motion_blurred: 350 images (50.0%)
+
+QUALITY METRICS
+--------------------------------------------------------------------------------
+Blur Scores (Laplacian Variance):
+  Mean: 108.42
+  Std:  295.28
+  Min:  1.79
+  Max:  5466.46
+  Median: 48.89
+
+Noise Scores:
+  Mean: 3.40
+  Std:  2.12
+  Min:  0.64
+  Max:  25.56
+  Median: 2.96
+
+Brightness Scores (Mean Pixel Intensity):
+  Mean: 119.57
+  Std:  32.15
+  Min:  12.98
+  Max:  207.89
+  Median: 121.98
+
+AGENT ANALYSIS
+--------------------------------------------------------------------------------
+Detected 1 issue(s):
+  1. [HIGH] 72.3% of images are blurry (506/700)
+
+
+Agent Decisions:
+  1. 72% images are blurry → recommend denoising
+
+Recommendations:
+  1. Apply denoising filter to blurry images
+
+DETECTED ISSUES
+--------------------------------------------------------------------------------
+1. [HIGH] BLUR
+   72.3% of images are blurry (506/700)
+
+================================================================================
+End of Report
+================================================================================
