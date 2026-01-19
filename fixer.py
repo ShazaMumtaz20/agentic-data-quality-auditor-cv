@@ -44,8 +44,8 @@ class ImageFixer:
         img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         
         if method == 'fastNlMeans':
-            # Fast Non-Local Means Denoising (best for blur)
-            denoised = cv2.fastNlMeansDenoisingColored(img_bgr, None, 10, 10, 7, 21)
+            # Fast Non-Local Means Denoising (increased strength for better noise removal)
+            denoised = cv2.fastNlMeansDenoisingColored(img_bgr, None, 20, 20, 7, 21)
         elif method == 'bilateral':
             # Bilateral Filter (preserves edges, good for noise)
             denoised = cv2.bilateralFilter(img_bgr, 9, 75, 75)
@@ -88,7 +88,7 @@ class ImageFixer:
     
     def normalize_brightness(self, image: np.ndarray, target_brightness: float = 128.0) -> np.ndarray:
         """
-        Normalize image brightness to target value.
+        Normalize image brightness to target value using adaptive adjustment.
         
         Args:
             image: RGB image array (H, W, 3)
@@ -98,14 +98,44 @@ class ImageFixer:
             Brightness-normalized image
         """
         # Convert to grayscale to compute current brightness
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32)
         current_brightness = np.mean(gray)
         
         if current_brightness == 0:
             return image  # Avoid division by zero
         
+        # Calculate the difference
+        brightness_diff = target_brightness - current_brightness
+        
+        # Use adaptive adjustment based on how far from target
+        if abs(brightness_diff) < 5:
+            return image  # Already close to target, no adjustment needed
+        
+        # For extreme cases, be more aggressive
+        if current_brightness < 30:  # Very dark
+            adjustment_factor = 0.85  # Move 85% toward target
+            min_adj, max_adj = 1.2, 4.0  # Allow significant increase
+        elif current_brightness > 220:  # Very bright
+            adjustment_factor = 0.75  # Move 75% toward target
+            min_adj, max_adj = 0.4, 0.9  # Allow significant decrease
+        elif current_brightness < 50:  # Dark
+            adjustment_factor = 0.80  # Move 80% toward target
+            min_adj, max_adj = 1.1, 2.5
+        elif current_brightness > 200:  # Bright
+            adjustment_factor = 0.70  # Move 70% toward target
+            min_adj, max_adj = 0.5, 0.95
+        else:  # Moderate brightness
+            adjustment_factor = 0.75  # Move 75% toward target
+            min_adj, max_adj = 0.7, 1.4
+        
+        # Calculate target brightness after adjustment
+        target_adjusted = current_brightness + (brightness_diff * adjustment_factor)
+        
         # Compute adjustment factor
-        adjustment = target_brightness / current_brightness
+        adjustment = target_adjusted / current_brightness
+        
+        # Apply limits
+        adjustment = np.clip(adjustment, min_adj, max_adj)
         
         # Apply adjustment to RGB image
         normalized = image.astype(np.float32) * adjustment
@@ -114,6 +144,84 @@ class ImageFixer:
         normalized = np.clip(normalized, 0, 255).astype(np.uint8)
         
         return normalized
+    
+    def normalize_sharpness(self, image: np.ndarray) -> np.ndarray:
+        """
+        Normalize over-sharpened images using Gaussian smoothing.
+        Uses stronger smoothing for better effect.
+        
+        Args:
+            image: RGB image array (H, W, 3)
+            
+        Returns:
+            Sharpness-normalized image
+        """
+        # Convert RGB to BGR for OpenCV
+        img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+        # Apply stronger Gaussian smoothing to reduce sharpness (larger kernel, higher sigma)
+        smoothed = cv2.GaussianBlur(img_bgr, (9, 9), 2.0)
+        
+        # Blend with original (75% smoothed, 25% original) for stronger effect
+        blended = cv2.addWeighted(smoothed, 0.75, img_bgr, 0.25, 0)
+        
+        # Convert back to RGB
+        smoothed_rgb = cv2.cvtColor(blended, cv2.COLOR_BGR2RGB)
+        
+        return smoothed_rgb
+    
+    def reduce_contrast(self, image: np.ndarray) -> np.ndarray:
+        """
+        Reduce high contrast by compressing the dynamic range more effectively.
+        
+        Args:
+            image: RGB image array (H, W, 3)
+            
+        Returns:
+            Contrast-reduced image
+        """
+        # Convert to LAB color space
+        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB).astype(np.float32)
+        l, a, b = cv2.split(lab)
+        
+        # Get current L channel statistics
+        l_min = np.min(l)
+        l_max = np.max(l)
+        l_mean = np.mean(l)
+        l_std = np.std(l)
+        
+        # More aggressive compression for high contrast images
+        if l_std > 50:  # Very high contrast
+            compression_factor = 0.5  # Compress to 50% of original range
+            blend_ratio = 0.8  # Use 80% of compressed version
+        elif l_std > 40:  # High contrast
+            compression_factor = 0.6  # Compress to 60% of original range
+            blend_ratio = 0.75  # Use 75% of compressed version
+        else:  # Moderate contrast
+            compression_factor = 0.7  # Compress to 70% of original range
+            blend_ratio = 0.7  # Use 70% of compressed version
+        
+        l_range = l_max - l_min
+        if l_range < 1e-6:
+            return image  # No contrast to reduce
+        
+        # Compress the dynamic range
+        new_min = l_mean - (l_range * compression_factor / 2.0)
+        new_max = l_mean + (l_range * compression_factor / 2.0)
+        
+        # Clamp and scale L channel
+        l_compressed = np.clip(l, new_min, new_max)
+        l_compressed = ((l_compressed - new_min) / (new_max - new_min + 1e-6)) * 255.0
+        
+        # Blend with original for smoother result
+        l_final = l_compressed * blend_ratio + l * (1 - blend_ratio)
+        
+        # Merge channels and convert back to RGB
+        lab_reduced = np.stack([l_final, a, b], axis=2)
+        lab_reduced = np.clip(lab_reduced, 0, 255).astype(np.uint8)
+        reduced = cv2.cvtColor(lab_reduced, cv2.COLOR_LAB2RGB)
+        
+        return reduced
     
     def resize_image(self, image: np.ndarray, target_size: Tuple[int, int] = (224, 224)) -> np.ndarray:
         """
@@ -152,6 +260,7 @@ class ImageFixer:
     def enhance_contrast(self, image: np.ndarray, method: str = 'CLAHE') -> np.ndarray:
         """
         Enhance image contrast using CLAHE or histogram equalization.
+        Uses adaptive parameters based on image contrast level.
         
         Args:
             image: RGB image array (H, W, 3)
@@ -165,8 +274,22 @@ class ImageFixer:
             lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
             l, a, b = cv2.split(lab)
             
+            # Calculate current contrast (standard deviation of L channel)
+            l_std = np.std(l.astype(np.float32))
+            
+            # Adaptive CLAHE parameters based on contrast level
+            if l_std < 15:  # Very low contrast - use stronger enhancement
+                clip_limit = 3.0
+                tile_size = (4, 4)  # Smaller tiles for more aggressive enhancement
+            elif l_std < 25:  # Low contrast
+                clip_limit = 2.5
+                tile_size = (6, 6)
+            else:  # Moderate contrast
+                clip_limit = 2.0
+                tile_size = (8, 8)
+            
             # Apply CLAHE to L channel
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_size)
             l_enhanced = clahe.apply(l)
             
             # Merge channels and convert back to RGB
@@ -184,9 +307,157 @@ class ImageFixer:
         else:
             raise ValueError(f"Unknown contrast enhancement method: {method}")
     
+    def fix_color_shift(self, image: np.ndarray) -> np.ndarray:
+        """
+        Fix overall color shift by balancing RGB channels using white balance.
+        Uses a very conservative approach to avoid over-correction.
+        DISABLED: This method can cause blue tint issues. Returning original image.
+        
+        Args:
+            image: RGB image array (H, W, 3)
+            
+        Returns:
+            Color-corrected image (currently returns original to avoid blue tint)
+        """
+        # TEMPORARILY DISABLED: Color shift fix is causing blue tint issues
+        # Return original image to prevent color distortion
+        return image.copy()
+        
+        # Original implementation (disabled):
+        # # Convert to float for calculations
+        # img_float = image.astype(np.float32)
+        # 
+        # # Compute mean values for each channel
+        # r_mean = np.mean(img_float[:, :, 0])
+        # g_mean = np.mean(img_float[:, :, 1])
+        # b_mean = np.mean(img_float[:, :, 2])
+        # 
+        # # Use gray world assumption: average of all channels should be similar
+        # # Target: make all channel means equal to the average of the three
+        # target_mean = (r_mean + g_mean + b_mean) / 3.0
+        # 
+        # # Only correct if there's a significant imbalance (avoid over-correction)
+        # max_deviation = max(abs(r_mean - target_mean), 
+        #                    abs(g_mean - target_mean), 
+        #                    abs(b_mean - target_mean))
+        # 
+        # # Only apply correction if deviation is significant (> 20) and very conservative
+        # if max_deviation < 20.0:
+        #     return image  # No significant color shift, return original
+        # 
+        # # Compute adjustment factors (extremely conservative - only 15% correction)
+        # correction_strength = 0.15
+        # if r_mean > 0:
+        #     r_factor = 1.0 + (target_mean / r_mean - 1.0) * correction_strength
+        #     r_factor = np.clip(r_factor, 0.85, 1.15)  # Limit to ±15% change
+        # else:
+        #     r_factor = 1.0
+        # if g_mean > 0:
+        #     g_factor = 1.0 + (target_mean / g_mean - 1.0) * correction_strength
+        #     g_factor = np.clip(g_factor, 0.85, 1.15)  # Limit to ±15% change
+        # else:
+        #     g_factor = 1.0
+        # if b_mean > 0:
+        #     b_factor = 1.0 + (target_mean / b_mean - 1.0) * correction_strength
+        #     b_factor = np.clip(b_factor, 0.85, 1.15)  # Limit to ±15% change
+        # else:
+        #     b_factor = 1.0
+        # 
+        # # Apply correction
+        # corrected = img_float.copy()
+        # corrected[:, :, 0] = corrected[:, :, 0] * r_factor
+        # corrected[:, :, 1] = corrected[:, :, 1] * g_factor
+        # corrected[:, :, 2] = corrected[:, :, 2] * b_factor
+        # 
+        # # Clip to valid range
+        # corrected = np.clip(corrected, 0, 255).astype(np.uint8)
+        # 
+        # return corrected
+    
+    def fix_color_diffusion(self, image: np.ndarray) -> np.ndarray:
+        """
+        Fix color diffusion by sharpening a and b channels in Lab space.
+        Made more conservative to avoid color distortion.
+        
+        Args:
+            image: RGB image array (H, W, 3)
+            
+        Returns:
+            Color-diffusion-corrected image
+        """
+        # Convert to Lab color space
+        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB).astype(np.float32)
+        l_channel = lab[:, :, 0]
+        a_channel = lab[:, :, 1]
+        b_channel = lab[:, :, 2]
+        
+        # Apply very gentle unsharp mask to a and b channels
+        # Create very mild sharpening kernel
+        kernel = np.array([[-1, -1, -1],
+                          [-1,  9, -1],
+                          [-1, -1, -1]]) * 0.05  # Very gentle sharpening (reduced from 0.1)
+        
+        a_sharpened = cv2.filter2D(a_channel, -1, kernel)
+        b_sharpened = cv2.filter2D(b_channel, -1, kernel)
+        
+        # Blend with original (75% original, 25% sharpened - very conservative)
+        a_corrected = a_channel * 0.75 + a_sharpened * 0.25
+        b_corrected = b_channel * 0.75 + b_sharpened * 0.25
+        
+        # Merge channels
+        lab_corrected = np.stack([l_channel, a_corrected, b_corrected], axis=2)
+        lab_corrected = np.clip(lab_corrected, 0, 255).astype(np.uint8)
+        
+        # Convert back to RGB
+        corrected = cv2.cvtColor(lab_corrected, cv2.COLOR_LAB2RGB)
+        
+        return corrected
+    
+    def fix_green_channel_shift(self, image: np.ndarray) -> np.ndarray:
+        """
+        Fix green channel shift by correcting green channel based on R and B channels.
+        
+        Args:
+            image: RGB image array (H, W, 3)
+            
+        Returns:
+            Green-channel-corrected image
+        """
+        # Extract channels
+        r_channel = image[:, :, 0].astype(np.float32)
+        g_channel = image[:, :, 1].astype(np.float32)
+        b_channel = image[:, :, 2].astype(np.float32)
+        
+        # Compute expected green channel (average of R and B)
+        expected_g = (r_channel + b_channel) / 2.0
+        
+        # Compute gradient magnitude mask (normalized)
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2).astype(np.float32)
+        
+        # Normalize gradient magnitude to [0, 1]
+        if gradient_magnitude.max() > 0:
+            gradient_mask = gradient_magnitude / gradient_magnitude.max()
+        else:
+            gradient_mask = np.zeros_like(gradient_magnitude)
+        
+        # Invert mask (apply correction more in non-edge regions)
+        correction_mask = 1.0 - gradient_mask * 0.5  # Gentle correction
+        
+        # Correct green channel by blending with expected
+        g_corrected = g_channel * correction_mask + expected_g * (1.0 - correction_mask)
+        
+        # Merge channels
+        corrected = np.stack([r_channel, g_corrected, b_channel], axis=2)
+        corrected = np.clip(corrected, 0, 255).astype(np.uint8)
+        
+        return corrected
+    
     def adjust_saturation(self, image: np.ndarray, factor: float = 1.0) -> np.ndarray:
         """
-        Adjust image saturation.
+        Adjust image saturation with proper handling and validation.
         
         Args:
             image: RGB image array (H, W, 3)
@@ -195,17 +466,56 @@ class ImageFixer:
         Returns:
             Saturation-adjusted image
         """
+        if factor == 1.0:
+            return image  # No change needed
+        
         # Convert to HSV
         hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV).astype(np.float32)
+        
+        # Store original saturation for validation
+        original_sat = hsv[:, :, 1].copy()
         
         # Adjust saturation channel
         hsv[:, :, 1] = hsv[:, :, 1] * factor
         
-        # Clip to valid range
+        # Clip to valid range [0, 255]
         hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
+        
+        # Ensure H and V channels are also in valid range
+        hsv[:, :, 0] = np.clip(hsv[:, :, 0], 0, 179)  # Hue is 0-179 in OpenCV
+        hsv[:, :, 2] = np.clip(hsv[:, :, 2], 0, 255)  # Value
         
         # Convert back to RGB
         adjusted = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+        
+        # Verify the adjustment was applied (check if saturation actually changed)
+        hsv_check = cv2.cvtColor(adjusted, cv2.COLOR_RGB2HSV).astype(np.float32)
+        mean_sat_before = np.mean(original_sat)
+        mean_sat_after = np.mean(hsv_check[:, :, 1])
+        
+        # If adjustment didn't work (e.g., image was already at limits), try alternative method
+        if abs(mean_sat_after - mean_sat_before) < 1.0 and abs(factor - 1.0) > 0.1:
+            # Use LAB color space as alternative for saturation adjustment
+            lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB).astype(np.float32)
+            l, a, b = cv2.split(lab)
+            
+            # Adjust a and b channels (color channels) to change saturation
+            if factor > 1.0:  # Increase saturation
+                a = a * (1.0 + (factor - 1.0) * 0.5)  # More conservative increase
+                b = b * (1.0 + (factor - 1.0) * 0.5)
+            else:  # Decrease saturation
+                a = a * factor
+                b = b * factor
+            
+            # Clip a and b channels (valid range is roughly -128 to 127, but we'll use 0-255)
+            a = np.clip(a, 0, 255)
+            b = np.clip(b, 0, 255)
+            
+            # Merge and convert back
+            lab_adjusted = np.stack([l, a, b], axis=2)
+            lab_adjusted = np.clip(lab_adjusted, 0, 255).astype(np.uint8)
+            adjusted = cv2.cvtColor(lab_adjusted, cv2.COLOR_LAB2RGB)
+        
         return adjusted
     
     def augment_image(self, image: np.ndarray, augmentation_type: str = 'random') -> np.ndarray:
@@ -246,6 +556,107 @@ class ImageFixer:
             return jittered
         else:
             return image
+    
+    def preprocess_image_with_verification(self, image: np.ndarray,
+                                          target_size: Tuple[int, int] = (224, 224),
+                                          blur_threshold: float = 100.0,
+                                          sharpness_threshold: float = 500.0,
+                                          noise_threshold: float = 20.0,
+                                          dark_threshold: float = 50.0,
+                                          bright_threshold: float = 200.0,
+                                          target_mean: float = 128.0,
+                                          low_contrast_threshold: float = 30.0,
+                                          high_contrast_threshold: float = 80.0,
+                                          max_iterations: int = 3) -> Tuple[np.ndarray, Dict]:
+        """
+        Comprehensive preprocessing with verification loop.
+        Re-measures metrics after each fix and escalates if needed.
+        
+        Returns:
+            Tuple of (processed_image, fix_log)
+        """
+        fix_log = {
+            'fixes_applied': [],
+            'iterations': 0,
+            'final_metrics': {}
+        }
+        
+        # Resize first
+        processed = self.resize_image(image, target_size=target_size)
+        
+        # Verification loop
+        for iteration in range(max_iterations):
+            fix_log['iterations'] = iteration + 1
+            
+            # Compute current metrics
+            gray = cv2.cvtColor(processed, cv2.COLOR_RGB2GRAY)
+            
+            # Blur/Sharpness (Laplacian variance)
+            laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+            blur_score = laplacian.var()
+            
+            # Brightness
+            brightness = np.mean(gray)
+            
+            # Contrast (std)
+            contrast = np.std(gray)
+            
+            # Noise (gradient std)
+            h_diff = np.diff(gray.astype(np.float64), axis=1)
+            v_diff = np.diff(gray.astype(np.float64), axis=0)
+            gradients = np.concatenate([h_diff.flatten(), v_diff.flatten()])
+            noise_score = np.std(gradients)
+            
+            # Check and apply fixes
+            needs_fix = False
+            
+            # 1. Check sharpness (over-sharpened)
+            if blur_score > sharpness_threshold:
+                processed = self.normalize_sharpness(processed)
+                fix_log['fixes_applied'].append(f'iteration_{iteration+1}: normalize_sharpness')
+                needs_fix = True
+            
+            # 2. Check noise
+            if noise_score > noise_threshold:
+                processed = self.denoise_image(processed, method='fastNlMeans')
+                fix_log['fixes_applied'].append(f'iteration_{iteration+1}: denoise')
+                needs_fix = True
+            
+            # 3. Check brightness
+            if brightness < dark_threshold or brightness > bright_threshold:
+                processed = self.normalize_brightness(processed, target_brightness=target_mean)
+                fix_log['fixes_applied'].append(f'iteration_{iteration+1}: normalize_brightness')
+                needs_fix = True
+            
+            # 4. Check contrast
+            if contrast < low_contrast_threshold:
+                processed = self.enhance_contrast(processed, method='CLAHE')
+                fix_log['fixes_applied'].append(f'iteration_{iteration+1}: enhance_contrast')
+                needs_fix = True
+            elif contrast > high_contrast_threshold:
+                processed = self.reduce_contrast(processed)
+                fix_log['fixes_applied'].append(f'iteration_{iteration+1}: reduce_contrast')
+                needs_fix = True
+            
+            # If no fixes needed, break
+            if not needs_fix:
+                break
+        
+        # Final metrics
+        gray_final = cv2.cvtColor(processed, cv2.COLOR_RGB2GRAY)
+        laplacian_final = cv2.Laplacian(gray_final, cv2.CV_64F)
+        h_diff_final = np.diff(gray_final.astype(np.float64), axis=1)
+        v_diff_final = np.diff(gray_final.astype(np.float64), axis=0)
+        gradients_final = np.concatenate([h_diff_final.flatten(), v_diff_final.flatten()])
+        
+        fix_log['final_metrics'] = {
+            'blur_score': laplacian_final.var(),
+            'brightness': np.mean(gray_final),
+            'contrast': np.std(gray_final),
+            'noise': np.std(gradients_final)
+        }
+        
+        return processed, fix_log
     
     def preprocess_image(self, image: np.ndarray,
                         target_size: Tuple[int, int] = (224, 224),
@@ -381,6 +792,28 @@ class ImageFixer:
                         'target_brightness': action.get('target_brightness', 128.0),
                         'reason': reason
                     })
+                elif action_type == 'contrast_enhance':
+                    image_fixes[idx].append({
+                        'type': 'contrast_enhance',
+                        'method': action.get('method', 'CLAHE'),
+                        'reason': reason
+                    })
+                elif action_type == 'contrast_reduce':
+                    image_fixes[idx].append({
+                        'type': 'contrast_reduce',
+                        'reason': reason
+                    })
+                elif action_type == 'normalize_sharpness':
+                    image_fixes[idx].append({
+                        'type': 'normalize_sharpness',
+                        'reason': reason
+                    })
+                elif action_type == 'adjust_saturation':
+                    image_fixes[idx].append({
+                        'type': 'adjust_saturation',
+                        'saturation_factor': action.get('saturation_factor', 1.0),
+                        'reason': reason
+                    })
         
         # Get excluded indices
         excluded_indices = set()
@@ -401,12 +834,17 @@ class ImageFixer:
             try:
                 img_path = image_paths[idx]
                 
-                # Determine what fixes to apply
+                # Track all fixes to apply
                 apply_denoising = False
                 denoise_method = 'fastNlMeans'
                 apply_brightness = False
                 target_brightness = 128.0
-                apply_sharpening = False
+                apply_contrast_enhance = False
+                contrast_method = 'CLAHE'
+                apply_contrast_reduce = False
+                apply_sharpness_normalize = False
+                apply_saturation_adjust = False
+                saturation_factor = 1.0
                 
                 fix_descriptions = []
                 for fix in fixes:
@@ -418,16 +856,57 @@ class ImageFixer:
                         apply_brightness = True
                         target_brightness = fix.get('target_brightness', 128.0)
                         fix_descriptions.append(f"brightness({target_brightness})")
+                    elif fix['type'] == 'contrast_enhance':
+                        apply_contrast_enhance = True
+                        contrast_method = fix.get('method', 'CLAHE')
+                        fix_descriptions.append(f"contrast_enhance({contrast_method})")
+                    elif fix['type'] == 'contrast_reduce':
+                        apply_contrast_reduce = True
+                        fix_descriptions.append("contrast_reduce")
+                    elif fix['type'] == 'normalize_sharpness':
+                        apply_sharpness_normalize = True
+                        fix_descriptions.append("normalize_sharpness")
+                    elif fix['type'] == 'adjust_saturation':
+                        apply_saturation_adjust = True
+                        saturation_factor = fix.get('saturation_factor', 1.0)
+                        fix_descriptions.append(f"adjust_saturation({saturation_factor:.2f})")
                 
-                # Apply fixes
-                fixed_image = self.fix_image(
-                    img_path,
-                    apply_denoising=apply_denoising,
-                    apply_brightness_norm=apply_brightness,
-                    apply_sharpening=apply_sharpening,
-                    target_brightness=target_brightness,
-                    denoise_method=denoise_method
-                )
+                # Load image
+                image = self.data_loader.load_image(img_path)
+                if image is None:
+                    skipped_count += 1
+                    continue
+                
+                # Apply fixes in correct order
+                # 0. Resize first (all images must be consistent size for model)
+                image = self.resize_image(image, target_size=(224, 224))
+                fix_descriptions.append("resize(224x224)")
+                
+                # 1. Denoising first (removes noise before other enhancements)
+                if apply_denoising:
+                    image = self.denoise_image(image, method=denoise_method)
+                
+                # 2. Brightness normalization
+                if apply_brightness:
+                    image = self.normalize_brightness(image, target_brightness=target_brightness)
+                
+                # 3. Contrast enhancement (if low contrast)
+                if apply_contrast_enhance:
+                    image = self.enhance_contrast(image, method=contrast_method)
+                
+                # 4. Contrast reduction (if high contrast)
+                if apply_contrast_reduce:
+                    image = self.reduce_contrast(image)
+                
+                # 5. Saturation adjustment
+                if apply_saturation_adjust:
+                    image = self.adjust_saturation(image, factor=saturation_factor)
+                
+                # 6. Sharpness normalization (last, as it affects overall image)
+                if apply_sharpness_normalize:
+                    image = self.normalize_sharpness(image)
+                
+                fixed_image = image
                 
                 # Save fixed image (preserve directory structure)
                 img_path_obj = Path(img_path)
@@ -460,16 +939,27 @@ class ImageFixer:
         for idx in unchanged_indices:
             try:
                 img_path = image_paths[idx]
+                
+                # Load and resize image (all images must be consistent size for model)
+                image = self.data_loader.load_image(img_path)
+                if image is None:
+                    skipped_count += 1
+                    continue
+                
+                # Resize to consistent size
+                image = self.resize_image(image, target_size=(224, 224))
+                
                 img_path_obj = Path(img_path)
                 relative_path = img_path_obj.relative_to(self.data_loader.dataset_path)
                 output_path = self.output_dir / relative_path
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                # Copy original image
-                shutil.copy2(img_path, output_path)
-                skipped_count += 1  # Count as "skipped" (no fix needed)
+                # Save resized image
+                image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(str(output_path), image_bgr)
+                skipped_count += 1  # Count as "skipped" (no fix needed, just resized)
             except Exception as e:
-                print(f"  Warning: Could not copy {image_paths[idx]}: {e}")
+                print(f"  Warning: Could not process {image_paths[idx]}: {e}")
                 continue
         
         excluded_count = len(excluded_indices)

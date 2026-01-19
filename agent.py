@@ -16,19 +16,18 @@ class QualityAgent:
     def __init__(self):
         """Initialize the quality agent with default thresholds."""
         # Thresholds for quality assessment
-        self.BLUR_THRESHOLD = 100.0  # Laplacian variance below this = blurry
-        self.BLUR_SEVERE = 50.0  # Below this = severely blurred (irreversible, should exclude)
-        self.BLUR_MILD = 75.0  # Between this and BLUR_THRESHOLD = mildly blurred
-        self.NOISE_THRESHOLD_HIGH = 20.0  # Noise score above this = noisy
-        self.BRIGHTNESS_DARK = 50.0  # Mean brightness below this = too dark
-        self.BRIGHTNESS_BRIGHT = 200.0  # Mean brightness above this = too bright
+        self.BLUR_THRESHOLD = 100.0  # Laplacian variance below this = blurry (REMOVE)
+        self.SHARPNESS_THRESHOLD = 500.0  # Laplacian variance above this = over-sharpened
+        self.NOISE_THRESHOLD = 20.0  # Noise score above this = noisy
+        self.DARK_THRESHOLD = 50.0  # Mean brightness below this = too dark
+        self.BRIGHT_THRESHOLD = 200.0  # Mean brightness above this = too bright
+        self.TARGET_MEAN = 128.0  # Target brightness
+        self.LOW_CONTRAST_THRESHOLD = 30.0  # Std below this = low contrast
+        self.HIGH_CONTRAST_THRESHOLD = 80.0  # Std above this = high contrast
         self.CLASS_IMBALANCE_RATIO = 0.3  # If one class has <30% of average, it's imbalanced
-        
-        # Action thresholds (when to actually apply fixes)
-        self.ACTION_BLUR_PERCENTAGE = 10.0  # Take action if >10% blurry
-        self.ACTION_NOISE_PERCENTAGE = 10.0  # Apply denoising if >10% noisy
-        self.ACTION_BRIGHTNESS_PERCENTAGE = 20.0  # Apply normalization if >20% problematic
         self.MAX_CLASS_REMOVAL_RATIO = 0.4  # Don't remove more than 40% from any class
+        self.LOW_SATURATION_THRESHOLD = 30.0  # Saturation below this = under-saturated
+        self.HIGH_SATURATION_THRESHOLD = 200.0  # Saturation above this = over-saturated
         
     def analyze(self, metrics_stats: Dict, class_distribution: Dict[str, int]) -> Dict:
         """
@@ -67,11 +66,11 @@ class QualityAgent:
             noise_stats = metrics_stats['noise']
             noise_mean = noise_stats['mean']
             
-            if noise_mean > self.NOISE_THRESHOLD_HIGH:
-                noise_percentage = self._estimate_noise_percentage(noise_mean, self.NOISE_THRESHOLD_HIGH)
+            if noise_mean > self.NOISE_THRESHOLD:
+                noise_percentage = self._estimate_noise_percentage(noise_mean, self.NOISE_THRESHOLD)
                 issues.append({
                     'type': 'noise',
-                    'severity': 'high' if noise_mean > self.NOISE_THRESHOLD_HIGH * 1.5 else 'medium',
+                    'severity': 'high' if noise_mean > self.NOISE_THRESHOLD * 1.5 else 'medium',
                     'description': f'Dataset has high noise levels (mean noise score: {noise_mean:.2f})'
                 })
                 decisions.append(f"{noise_percentage:.0f}% images are noisy → recommend denoising")
@@ -82,7 +81,7 @@ class QualityAgent:
             brightness_stats = metrics_stats['brightness']
             brightness_mean = brightness_stats['mean']
             
-            if brightness_mean < self.BRIGHTNESS_DARK:
+            if brightness_mean < self.DARK_THRESHOLD:
                 issues.append({
                     'type': 'brightness',
                     'severity': 'medium',
@@ -90,7 +89,7 @@ class QualityAgent:
                 })
                 decisions.append("Dataset too dark → recommend brightness normalization")
                 recommendations.append("Apply brightness normalization to improve visibility")
-            elif brightness_mean > self.BRIGHTNESS_BRIGHT:
+            elif brightness_mean > self.BRIGHT_THRESHOLD:
                 issues.append({
                     'type': 'brightness',
                     'severity': 'medium',
@@ -173,10 +172,17 @@ class QualityAgent:
                       noise_scores: List[float],
                       brightness_scores: List[float],
                       image_paths: List[str],
-                      class_distribution: Dict[str, int]) -> Dict:
+                      class_distribution: Dict[str, int],
+                      contrast_scores: Optional[List[float]] = None,
+                      saturation_scores: Optional[List[float]] = None,
+                      corruption_flags: Optional[List[bool]] = None) -> Dict:
         """
         Analyze dataset and decide on concrete actions following realistic ML engineering rules.
         Blur is irreversible - exclude severely blurred images instead of trying to fix.
+        
+        Supported fixes: blur removal (exclusion), noise reduction, brightness normalization,
+        contrast adjustment, sharpness normalization, and saturation adjustment.
+        All images are resized to 224x224 for model consistency.
         
         Args:
             blur_scores: List of blur scores for each image
@@ -184,6 +190,9 @@ class QualityAgent:
             brightness_scores: List of brightness scores for each image
             image_paths: List of paths to images
             class_distribution: Dictionary mapping class names to counts
+            contrast_scores: Optional list of contrast scores
+            saturation_scores: Optional list of saturation scores
+            corruption_flags: Optional list of corruption flags
             
         Returns:
             Dictionary containing:
@@ -215,9 +224,9 @@ class QualityAgent:
         # Analyze blur with realistic handling (CRITICAL: blur is irreversible)
         if len(blur_scores) > 0:
             # Categorize blur severity
-            severely_blurred = [i for i, score in enumerate(blur_scores) if score < self.BLUR_SEVERE]
-            mildly_blurred = [i for i, score in enumerate(blur_scores) 
-                            if self.BLUR_SEVERE <= score < self.BLUR_THRESHOLD]
+            # Anything below BLUR_THRESHOLD (100.0) is considered blurry and will be removed
+            severely_blurred = [i for i, score in enumerate(blur_scores) if score < self.BLUR_THRESHOLD]
+            mildly_blurred = []  # No mild category - either acceptable or removed
             acceptable_blur = [i for i, score in enumerate(blur_scores) if score >= self.BLUR_THRESHOLD]
             
             severe_count = len(severely_blurred)
@@ -254,7 +263,7 @@ class QualityAgent:
                         excluded_images.append({
                             'image_index': idx,
                             'image_path': image_paths[idx],
-                            'reason': f'Severely blurred (score: {blur_scores[idx]:.2f} < {self.BLUR_SEVERE}) - irreversible defect',
+                            'reason': f'Blurry image (score: {blur_scores[idx]:.2f} < {self.BLUR_THRESHOLD}) - irreversible defect',
                             'blur_score': blur_scores[idx],
                             'class': class_name
                         })
@@ -274,7 +283,7 @@ class QualityAgent:
                         'affected_count': len(final_excluded)
                     })
                     decisions.append(f"{len(final_excluded)} severely blurred images → EXCLUDING from cleaned dataset (blur is irreversible)")
-                    action_plan.append(f"EXCLUDE {len(final_excluded)} severely blurred images (blur score < {self.BLUR_SEVERE})")
+                    action_plan.append(f"EXCLUDE {len(final_excluded)} blurry images (blur score < {self.BLUR_THRESHOLD})")
                     
                     actions.append({
                         'type': 'exclude',
@@ -301,18 +310,18 @@ class QualityAgent:
                         'blur_score': blur_scores[idx]
                     })
         
-        # Analyze noise with actual scores (noise CAN be fixed)
+        # Analyze noise with actual scores (noise CAN be fixed) - detect ALL noisy images
         noisy_indices = []
         if len(noise_scores) > 0:
-            noisy_count = sum(1 for score in noise_scores if score > self.NOISE_THRESHOLD_HIGH)
-            noise_percentage = (noisy_count / len(noise_scores)) * 100
+            excluded_set = set([ex['image_index'] for ex in excluded_images])
             
-            if noise_percentage > self.ACTION_NOISE_PERCENTAGE:
-                # Find indices of noisy images (only those not excluded)
-                noisy_indices = [i for i, score in enumerate(noise_scores) 
-                               if score > self.NOISE_THRESHOLD_HIGH and i not in [ex['image_index'] for ex in excluded_images]]
-                
-                if len(noisy_indices) > 0:
+            # Find indices of noisy images (only those not excluded)
+            noisy_indices = [i for i, score in enumerate(noise_scores) 
+                           if score > self.NOISE_THRESHOLD and i not in excluded_set]
+            noisy_count = len(noisy_indices)
+            noise_percentage = (noisy_count / len(noise_scores)) * 100 if len(noise_scores) > 0 else 0
+            
+            if noisy_count > 0:
                     issues.append({
                         'type': 'noise',
                         'severity': 'high' if noise_percentage > 30 else 'medium',
@@ -343,72 +352,197 @@ class QualityAgent:
         dark_indices = []
         bright_indices = []
         if len(brightness_scores) > 0:
-            dark_count = sum(1 for score in brightness_scores if score < self.BRIGHTNESS_DARK)
-            bright_count = sum(1 for score in brightness_scores if score > self.BRIGHTNESS_BRIGHT)
+            # Debug: Show brightness range
+            min_brightness = min(brightness_scores)
+            max_brightness = max(brightness_scores)
+            mean_brightness = np.mean(brightness_scores)
+            
+            dark_count = sum(1 for score in brightness_scores if score < self.DARK_THRESHOLD)
+            bright_count = sum(1 for score in brightness_scores if score > self.BRIGHT_THRESHOLD)
             dark_percentage = (dark_count / len(brightness_scores)) * 100
             bright_percentage = (bright_count / len(brightness_scores)) * 100
             
             excluded_set = set([ex['image_index'] for ex in excluded_images])
             
-            if dark_percentage > self.ACTION_BRIGHTNESS_PERCENTAGE:
+            # Check dark images
+            if dark_count > 0:
                 dark_indices = [i for i, score in enumerate(brightness_scores) 
-                              if score < self.BRIGHTNESS_DARK and i not in excluded_set]
+                              if score < self.DARK_THRESHOLD and i not in excluded_set]
                 
                 if len(dark_indices) > 0:
                     issues.append({
-                        'type': 'brightness',
+                        'type': 'brightness_dark',
                         'severity': 'medium',
-                        'description': f'{len(dark_indices)} images are too dark',
+                        'description': f'{len(dark_indices)} images are too dark ({dark_percentage:.1f}%)',
                         'affected_count': len(dark_indices)
                     })
                     decisions.append(f"{len(dark_indices)} images too dark → applying brightness normalization")
                     
                     actions.append({
                         'type': 'brightness_normalize',
-                        'target_brightness': 128.0,
+                        'target_brightness': self.TARGET_MEAN,
                         'indices': dark_indices,
-                        'reason': f'Low brightness detected - normalizing toward target (128.0)'
+                        'reason': f'Low brightness detected - normalizing toward target ({self.TARGET_MEAN})'
                     })
-                    action_plan.append(f"Normalize brightness to 128.0 for {len(dark_indices)} dark images")
+                    action_plan.append(f"Normalize brightness to {self.TARGET_MEAN} for {len(dark_indices)} dark images")
                     
                     for idx in dark_indices:
                         per_image_actions.append({
                             'image_index': idx,
                             'image_path': image_paths[idx],
                             'action': 'brightness_normalize',
-                            'reason': f'Low brightness (score: {brightness_scores[idx]:.2f}) - normalizing to 128.0',
+                            'reason': f'Low brightness (score: {brightness_scores[idx]:.2f}) - normalizing to {self.TARGET_MEAN}',
                             'brightness_score': brightness_scores[idx]
                         })
             
-            if bright_percentage > self.ACTION_BRIGHTNESS_PERCENTAGE:
+            # Check bright images
+            if bright_count > 0:
                 bright_indices = [i for i, score in enumerate(brightness_scores) 
-                                if score > self.BRIGHTNESS_BRIGHT and i not in excluded_set]
+                                if score > self.BRIGHT_THRESHOLD and i not in excluded_set]
                 
                 if len(bright_indices) > 0:
                     issues.append({
-                        'type': 'brightness',
+                        'type': 'brightness_bright',
                         'severity': 'medium',
-                        'description': f'{len(bright_indices)} images are too bright',
+                        'description': f'{len(bright_indices)} images are too bright ({bright_percentage:.1f}%)',
                         'affected_count': len(bright_indices)
                     })
                     decisions.append(f"{len(bright_indices)} images too bright → applying brightness normalization")
                     
                     actions.append({
                         'type': 'brightness_normalize',
-                        'target_brightness': 128.0,
+                        'target_brightness': self.TARGET_MEAN,
                         'indices': bright_indices,
-                        'reason': f'High brightness detected - normalizing toward target (128.0)'
+                        'reason': f'High brightness detected - normalizing toward target ({self.TARGET_MEAN})'
                     })
-                    action_plan.append(f"Normalize brightness to 128.0 for {len(bright_indices)} bright images")
+                    action_plan.append(f"Normalize brightness to {self.TARGET_MEAN} for {len(bright_indices)} bright images")
                     
                     for idx in bright_indices:
                         per_image_actions.append({
                             'image_index': idx,
                             'image_path': image_paths[idx],
                             'action': 'brightness_normalize',
-                            'reason': f'High brightness (score: {brightness_scores[idx]:.2f}) - normalizing to 128.0',
+                            'reason': f'High brightness (score: {brightness_scores[idx]:.2f}) - normalizing to {self.TARGET_MEAN}',
                             'brightness_score': brightness_scores[idx]
                         })
+        
+        # Analyze contrast with actual scores
+        if contrast_scores and len(contrast_scores) > 0:
+            excluded_set = set([ex['image_index'] for ex in excluded_images])
+            
+            low_contrast_count = sum(1 for score in contrast_scores if score < self.LOW_CONTRAST_THRESHOLD)
+            high_contrast_count = sum(1 for score in contrast_scores if score > self.HIGH_CONTRAST_THRESHOLD)
+            low_contrast_percentage = (low_contrast_count / len(contrast_scores)) * 100
+            high_contrast_percentage = (high_contrast_count / len(contrast_scores)) * 100
+            
+            # Check low contrast
+            if low_contrast_count > 0:
+                low_contrast_indices = [i for i, score in enumerate(contrast_scores)
+                                      if score < self.LOW_CONTRAST_THRESHOLD and i not in excluded_set]
+                
+                if len(low_contrast_indices) > 0:
+                    issues.append({
+                        'type': 'contrast_low',
+                        'severity': 'medium',
+                        'description': f'{len(low_contrast_indices)} images have low contrast ({low_contrast_percentage:.1f}%)',
+                        'affected_count': len(low_contrast_indices)
+                    })
+                    decisions.append(f"{len(low_contrast_indices)} images have low contrast → applying CLAHE enhancement")
+                    
+                    actions.append({
+                        'type': 'contrast_enhance',
+                        'method': 'CLAHE',
+                        'indices': low_contrast_indices,
+                        'reason': f'Low contrast detected - applying CLAHE enhancement'
+                    })
+                    action_plan.append(f"Apply CLAHE contrast enhancement to {len(low_contrast_indices)} images")
+            
+            # Check high contrast
+            if high_contrast_count > 0:
+                high_contrast_indices = [i for i, score in enumerate(contrast_scores)
+                                       if score > self.HIGH_CONTRAST_THRESHOLD and i not in excluded_set]
+                
+                if len(high_contrast_indices) > 0:
+                    issues.append({
+                        'type': 'contrast_high',
+                        'severity': 'medium',
+                        'description': f'{len(high_contrast_indices)} images have high contrast ({high_contrast_percentage:.1f}%)',
+                        'affected_count': len(high_contrast_indices)
+                    })
+                    decisions.append(f"{len(high_contrast_indices)} images have high contrast → applying contrast reduction")
+                    
+                    actions.append({
+                        'type': 'contrast_reduce',
+                        'indices': high_contrast_indices,
+                        'reason': f'High contrast detected - applying histogram normalization'
+                    })
+                    action_plan.append(f"Reduce contrast for {len(high_contrast_indices)} images")
+        
+        # Analyze sharpness (over-sharpened images)
+        if len(blur_scores) > 0:
+            excluded_set = set([ex['image_index'] for ex in excluded_images])
+            over_sharpened = [i for i, score in enumerate(blur_scores)
+                            if score > self.SHARPNESS_THRESHOLD and i not in excluded_set]
+            over_sharpened_count = len(over_sharpened)
+            over_sharpened_percentage = (over_sharpened_count / len(blur_scores)) * 100 if len(blur_scores) > 0 else 0
+            
+            if over_sharpened_count > 0:
+                issues.append({
+                    'type': 'sharpness',
+                    'severity': 'medium',
+                    'description': f'{over_sharpened_count} images are over-sharpened ({over_sharpened_percentage:.1f}%)',
+                    'affected_count': over_sharpened_count
+                })
+                decisions.append(f"{over_sharpened_count} images are over-sharpened → applying Gaussian smoothing")
+                
+                actions.append({
+                    'type': 'normalize_sharpness',
+                    'indices': over_sharpened,
+                    'reason': f'Over-sharpening detected - applying Gaussian smoothing to normalize'
+                })
+                action_plan.append(f"Normalize sharpness for {over_sharpened_count} over-sharpened images")
+        
+        # Analyze saturation issues
+        if saturation_scores and len(saturation_scores) > 0:
+            excluded_set = set([ex['image_index'] for ex in excluded_images])
+            low_sat_indices = [i for i, score in enumerate(saturation_scores) 
+                             if score < self.LOW_SATURATION_THRESHOLD and i not in excluded_set]
+            high_sat_indices = [i for i, score in enumerate(saturation_scores) 
+                              if score > self.HIGH_SATURATION_THRESHOLD and i not in excluded_set]
+            
+            if len(low_sat_indices) > 0:
+                issues.append({
+                    'type': 'low_saturation',
+                    'severity': 'low',
+                    'description': f'{len(low_sat_indices)} images are under-saturated',
+                    'affected_count': len(low_sat_indices)
+                })
+                decisions.append(f"{len(low_sat_indices)} images are under-saturated → increasing saturation")
+                
+                actions.append({
+                    'type': 'adjust_saturation',
+                    'indices': low_sat_indices,
+                    'saturation_factor': 1.3,  # Increase by 30%
+                    'reason': f'Low saturation detected - increasing saturation'
+                })
+                action_plan.append(f"Increase saturation for {len(low_sat_indices)} under-saturated images")
+            
+            if len(high_sat_indices) > 0:
+                issues.append({
+                    'type': 'high_saturation',
+                    'severity': 'medium',
+                    'description': f'{len(high_sat_indices)} images are over-saturated',
+                    'affected_count': len(high_sat_indices)
+                })
+                decisions.append(f"{len(high_sat_indices)} images are over-saturated → reducing saturation")
+                
+                actions.append({
+                    'type': 'adjust_saturation',
+                    'indices': high_sat_indices,
+                    'saturation_factor': 0.6,  # Reduce by 40% (more aggressive)
+                    'reason': f'High saturation detected - reducing saturation'
+                })
+                action_plan.append(f"Reduce saturation for {len(high_sat_indices)} over-saturated images")
         
         # Analyze class distribution (only recommend, don't auto-fix)
         if len(class_distribution) > 0:
@@ -502,7 +636,7 @@ class QualityAgent:
         
         # Analyze noise with actual scores
         if len(noise_scores) > 0:
-            noisy_count = sum(1 for score in noise_scores if score > self.NOISE_THRESHOLD_HIGH)
+            noisy_count = sum(1 for score in noise_scores if score > self.NOISE_THRESHOLD)
             noise_percentage = (noisy_count / len(noise_scores)) * 100
             
             if noise_percentage > 10:  # More than 10% noisy
@@ -516,8 +650,8 @@ class QualityAgent:
         
         # Analyze brightness with actual scores
         if len(brightness_scores) > 0:
-            dark_count = sum(1 for score in brightness_scores if score < self.BRIGHTNESS_DARK)
-            bright_count = sum(1 for score in brightness_scores if score > self.BRIGHTNESS_BRIGHT)
+            dark_count = sum(1 for score in brightness_scores if score < self.DARK_THRESHOLD)
+            bright_count = sum(1 for score in brightness_scores if score > self.BRIGHT_THRESHOLD)
             dark_percentage = (dark_count / len(brightness_scores)) * 100
             bright_percentage = (bright_count / len(brightness_scores)) * 100
             

@@ -152,10 +152,70 @@ class Visualizer:
         plt.close()
         print(f"Noise distribution plot saved to {save_path}")
     
+    def plot_contrast_distribution(self, contrast_scores: List[float], save_path: str = None):
+        """
+        Plot distribution of contrast scores.
+        
+        Args:
+            contrast_scores: List of contrast scores (standard deviation of pixel intensities)
+            save_path: Optional path to save the plot
+        """
+        plt.figure(figsize=(10, 6))
+        plt.hist(contrast_scores, bins=50, edgecolor='black', alpha=0.7)
+        plt.xlabel('Contrast Score (Standard Deviation)', fontsize=12)
+        plt.ylabel('Number of Images', fontsize=12)
+        plt.title('Distribution of Contrast Scores', fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3)
+        
+        # Add vertical lines for thresholds
+        plt.axvline(x=30, color='red', linestyle='--', label='Low Contrast Threshold (30)')
+        plt.axvline(x=80, color='orange', linestyle='--', label='High Contrast Threshold (80)')
+        plt.legend()
+        
+        if save_path is None:
+            save_path = self.output_dir / "contrast_distribution.png"
+        else:
+            save_path = Path(save_path)
+        
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Contrast distribution plot saved to {save_path}")
+    
+    def plot_saturation_distribution(self, saturation_scores: List[float], save_path: str = None):
+        """
+        Plot distribution of saturation scores.
+        
+        Args:
+            saturation_scores: List of saturation scores (mean saturation value)
+            save_path: Optional path to save the plot
+        """
+        plt.figure(figsize=(10, 6))
+        plt.hist(saturation_scores, bins=50, edgecolor='black', alpha=0.7)
+        plt.xlabel('Saturation Score (Mean Saturation)', fontsize=12)
+        plt.ylabel('Number of Images', fontsize=12)
+        plt.title('Distribution of Saturation Scores', fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3)
+        
+        # Add vertical lines for thresholds
+        plt.axvline(x=30, color='red', linestyle='--', label='Low Saturation Threshold (30)')
+        plt.axvline(x=200, color='orange', linestyle='--', label='High Saturation Threshold (200)')
+        plt.legend()
+        
+        if save_path is None:
+            save_path = self.output_dir / "saturation_distribution.png"
+        else:
+            save_path = Path(save_path)
+        
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Saturation distribution plot saved to {save_path}")
+    
     def generate_all_plots(self, brightness_scores: List[float],
                           blur_scores: List[float],
                           noise_scores: List[float],
-                          class_distribution: Dict[str, int]):
+                          class_distribution: Dict[str, int],
+                          contrast_scores: List[float] = None,
+                          saturation_scores: List[float] = None):
         """
         Generate all visualization plots.
         
@@ -164,10 +224,21 @@ class Visualizer:
             blur_scores: List of blur scores
             noise_scores: List of noise scores
             class_distribution: Dictionary mapping class names to counts
+            contrast_scores: Optional list of contrast scores
+            saturation_scores: Optional list of saturation scores
         """
         print("\nGenerating visualizations...")
         self.plot_brightness_histogram(brightness_scores)
         self.plot_class_distribution(class_distribution)
         self.plot_blur_distribution(blur_scores)
         self.plot_noise_distribution(noise_scores)
+        
+        # Plot contrast if available
+        if contrast_scores is not None and len(contrast_scores) > 0:
+            self.plot_contrast_distribution(contrast_scores)
+        
+        # Plot saturation if available
+        if saturation_scores is not None and len(saturation_scores) > 0:
+            self.plot_saturation_distribution(saturation_scores)
+        
         print("All visualizations generated successfully!")

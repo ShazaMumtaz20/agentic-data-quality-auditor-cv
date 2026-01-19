@@ -105,6 +105,23 @@ class ReportGenerator:
                 if after_dist < before_dist:
                     report.append(f"  ✓ Improved: {before_dist:.2f} → {after_dist:.2f} deviation from target")
                 report.append("")
+            
+            if 'contrast' in before_metrics['stats'] and 'contrast' in after_metrics['stats']:
+                before_contrast = before_metrics['stats']['contrast']
+                after_contrast = after_metrics['stats']['contrast']
+                improvement = ((after_contrast['mean'] - before_contrast['mean']) / before_contrast['mean']) * 100 if before_contrast['mean'] > 0 else 0
+                report.append("Contrast Scores (Standard Deviation):")
+                report.append(f"  Before - Mean: {before_contrast['mean']:.2f}")
+                report.append(f"  After  - Mean: {after_contrast['mean']:.2f} ({improvement:+.1f}%)")
+                report.append("")
+            
+            if 'sharpness' in before_metrics['stats'] and 'sharpness' in after_metrics['stats']:
+                before_sharp = before_metrics['stats']['sharpness']
+                after_sharp = after_metrics['stats']['sharpness']
+                report.append("Sharpness Scores (Laplacian Variance):")
+                report.append(f"  Before - Mean: {before_sharp['mean']:.2f}")
+                report.append(f"  After  - Mean: {after_sharp['mean']:.2f}")
+                report.append("")
         else:
             report.append("QUALITY METRICS")
             report.append("-" * 80)
@@ -171,6 +188,31 @@ class ReportGenerator:
                 report.append(f"{i}. [{issue['severity'].upper()}] {issue['type'].upper()}")
                 report.append(f"   {issue['description']}")
                 report.append("")
+        
+        # Sharpness Analysis
+        if 'sharpness' in metrics_stats:
+            sharpness = metrics_stats['sharpness']
+            report.append("Sharpness Scores (Laplacian Variance):")
+            report.append(f"  Mean: {sharpness['mean']:.2f}")
+            report.append(f"  Std:  {sharpness['std']:.2f}")
+            report.append(f"  Min:  {sharpness['min']:.2f}")
+            report.append(f"  Max:  {sharpness['max']:.2f}")
+            report.append(f"  Median: {sharpness['median']:.2f}")
+            report.append("")
+        
+        # Model Evaluation Results
+        if 'evaluation' in agent_analysis:
+            report.append("MODEL EVALUATION RESULTS")
+            report.append("-" * 80)
+            eval_data = agent_analysis['evaluation']
+            report.append(f"Original Dataset Accuracy: {eval_data['original_accuracy']:.2f}%")
+            report.append(f"Cleaned Dataset Accuracy: {eval_data['cleaned_accuracy']:.2f}%")
+            report.append(f"Improvement: {eval_data['improvement']:+.2f}% ({eval_data['improvement_percent']:+.1f}% relative)")
+            if eval_data['justified']:
+                report.append("✓ Preprocessing justified - cleaned dataset performs better")
+            else:
+                report.append("⚠ Review preprocessing - cleaned dataset performance needs improvement")
+            report.append("")
         
         # Fixes Applied and Exclusions
         if fixed_count > 0 or (agent_analysis.get('excluded_images') and len(agent_analysis['excluded_images']) > 0):

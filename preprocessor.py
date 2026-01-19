@@ -118,70 +118,72 @@ class DatasetPreprocessor:
                 # Load image
                 image = self.data_loader.load_image(img_path)
                 
-                # Determine what preprocessing to apply
-                needs_denoising = False
-                needs_brightness = False
-                needs_contrast = False
-                needs_saturation = False
+                # Check if image should be removed (blurry)
+                blur_score = blur_scores[i] if i < len(blur_scores) else 0.0
+                if blur_score < 100.0:  # BLUR_THRESHOLD
+                    # Remove blurry image
+                    self._move_to_removed(img_path, f"Blurry image (blur score: {blur_score:.2f} < 100.0)")
+                    excluded_indices.add(i)
+                    stats['removed'] += 1
+                    stats['removed_reasons']['blur'] = stats['removed_reasons'].get('blur', 0) + 1
+                    continue
                 
-                # Check noise
-                if i < len(noise_scores) and noise_scores[i] > 20.0:
-                    needs_denoising = True
-                
-                # Check brightness
-                if i < len(brightness_scores):
-                    if brightness_scores[i] < 50.0 or brightness_scores[i] > 200.0:
-                        needs_brightness = True
-                
-                # Check contrast
-                if i < len(contrast_scores) and contrast_scores[i] < 30.0:
-                    needs_contrast = True
-                
-                # Check saturation
-                if i < len(saturation_scores) and saturation_scores[i] > 200.0:
-                    needs_saturation = True  # Over-saturated, reduce
-                
-                # Apply preprocessing pipeline
-                processed_image = self.fixer.preprocess_image(
+                # Apply preprocessing with verification loop
+                processed_image, fix_log = self.fixer.preprocess_image_with_verification(
                     image,
                     target_size=self.target_size,
-                    apply_resize=True,
-                    apply_denoising=needs_denoising,
-                    apply_brightness_norm=needs_brightness,
-                    apply_contrast_enhance=needs_contrast,
-                    apply_saturation_adjust=needs_saturation,
-                    target_brightness=128.0,
-                    denoise_method='bilateral',
-                    contrast_method='CLAHE',
-                    saturation_factor=0.9 if needs_saturation else 1.0
+                    blur_threshold=100.0,
+                    sharpness_threshold=500.0,
+                    noise_threshold=20.0,
+                    dark_threshold=50.0,
+                    bright_threshold=200.0,
+                    target_mean=128.0,
+                    low_contrast_threshold=30.0,
+                    high_contrast_threshold=80.0,
+                    max_iterations=3
                 )
+                
+                # Verify final metrics - if still violates, escalate
+                final_blur = fix_log['final_metrics']['blur_score']
+                if final_blur < 100.0:
+                    # Still blurry after fixes - remove
+                    self._move_to_removed(img_path, f"Still blurry after fixes (blur score: {final_blur:.2f})")
+                    excluded_indices.add(i)
+                    stats['removed'] += 1
+                    stats['removed_reasons']['blur_after_fix'] = stats['removed_reasons'].get('blur_after_fix', 0) + 1
+                    continue
                 
                 # Save processed image
                 self._save_processed_image(img_path, processed_image)
                 
-                fixes_applied = []
-                if needs_denoising:
-                    fixes_applied.append("denoise")
-                if needs_brightness:
-                    fixes_applied.append("brightness_norm")
-                if needs_contrast:
-                    fixes_applied.append("contrast_enhance")
-                if needs_saturation:
-                    fixes_applied.append("saturation_adjust")
-                
-                if fixes_applied:
+                # Log fixes applied
+                if len(fix_log['fixes_applied']) > 0:
                     stats['fixed'] += 1
                     self.preprocessing_log.append({
                         'image': img_path,
                         'action': 'fixed',
-                        'fixes': fixes_applied
+                        'fixes': fix_log['fixes_applied'],
+                        'iterations': fix_log['iterations'],
+                        'before_metrics': {
+                            'blur': blur_score,
+                            'brightness': brightness_scores[i] if i < len(brightness_scores) else None,
+                            'contrast': contrast_scores[i] if i < len(contrast_scores) else None,
+                            'noise': noise_scores[i] if i < len(noise_scores) else None
+                        },
+                        'after_metrics': fix_log['final_metrics']
                     })
                 else:
                     stats['kept_unchanged'] += 1
                     self.preprocessing_log.append({
                         'image': img_path,
                         'action': 'kept',
-                        'fixes': []
+                        'fixes': [],
+                        'metrics': {
+                            'blur': blur_score,
+                            'brightness': brightness_scores[i] if i < len(brightness_scores) else None,
+                            'contrast': contrast_scores[i] if i < len(contrast_scores) else None,
+                            'noise': noise_scores[i] if i < len(noise_scores) else None
+                        }
                     })
                 
                 stats['processed'] += 1

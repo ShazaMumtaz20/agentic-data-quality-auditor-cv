@@ -12,6 +12,7 @@ from visualizer import Visualizer
 from fixer import ImageFixer
 from report_generator import ReportGenerator
 from preprocessor import DatasetPreprocessor
+# ModelEvaluator imported conditionally when --evaluate is used
 
 
 def main():
@@ -42,6 +43,17 @@ def main():
         '--no-viz',
         action='store_true',
         help='Skip generating visualizations'
+    )
+    parser.add_argument(
+        '--evaluate',
+        action='store_true',
+        help='Evaluate model performance on cleaned vs uncleaned datasets'
+    )
+    parser.add_argument(
+        '--eval-epochs',
+        type=int,
+        default=5,
+        help='Number of epochs for model evaluation (default: 5)'
     )
     
     args = parser.parse_args()
@@ -82,28 +94,30 @@ def main():
     try:
         agent = QualityAgent()
         
-        # Use decide_actions for actionable decisions (when --fix is used)
+        # Always use decide_actions to detect ALL issues (brightness, contrast, sharpness, etc.)
+        # Get all available metrics
+        contrast_scores = metrics_data.get('contrast_scores', [])
+        saturation_scores = metrics_data.get('saturation_scores', [])
+        corruption_flags = metrics_data.get('corruption_flags', [False] * len(metrics_data['image_paths']))
+        
+        agent_analysis = agent.decide_actions(
+            blur_scores=metrics_data['blur_scores'],
+            noise_scores=metrics_data['noise_scores'],
+            brightness_scores=metrics_data['brightness_scores'],
+            image_paths=metrics_data['image_paths'],
+            class_distribution=class_distribution,
+            contrast_scores=contrast_scores if contrast_scores else None,
+            saturation_scores=saturation_scores if saturation_scores else None,
+            corruption_flags=corruption_flags if corruption_flags else None
+        )
+        
+        print("  Agent Summary:")
+        print(f"  {agent_analysis['summary']}")
+        
         if args.fix:
-            # Get all available metrics
-            contrast_scores = metrics_data.get('contrast_scores', [])
-            saturation_scores = metrics_data.get('saturation_scores', [])
-            corruption_flags = metrics_data.get('corruption_flags', [False] * len(metrics_data['image_paths']))
-            
-            agent_analysis = agent.decide_actions(
-                blur_scores=metrics_data['blur_scores'],
-                noise_scores=metrics_data['noise_scores'],
-                brightness_scores=metrics_data['brightness_scores'],
-                image_paths=metrics_data['image_paths'],
-                class_distribution=class_distribution,
-                contrast_scores=contrast_scores if contrast_scores else None,
-                saturation_scores=saturation_scores if saturation_scores else None,
-                corruption_flags=corruption_flags if corruption_flags else None
-            )
-            
-            print("  Agent Summary:")
-            print(f"  {agent_analysis['summary']}")
-            if len(agent_analysis['action_plan']) > 0:
-                print("\n  Action Plan:")
+            # When --fix is used, show actions that will be applied
+            if len(agent_analysis.get('action_plan', [])) > 0:
+                print("\n  Action Plan (will be applied):")
                 for action in agent_analysis['action_plan']:
                     print(f"    • {action}")
             if len(agent_analysis['decisions']) > 0:
@@ -111,20 +125,31 @@ def main():
                 for decision in agent_analysis['decisions']:
                     print(f"    • {decision}")
         else:
-            # Use analyze_with_scores for recommendations only
-            agent_analysis = agent.analyze_with_scores(
-                blur_scores=metrics_data['blur_scores'],
-                noise_scores=metrics_data['noise_scores'],
-                brightness_scores=metrics_data['brightness_scores'],
-                class_distribution=class_distribution
-            )
+            # When --fix is NOT used, show recommendations only (use action_plan, skip decisions to avoid duplication)
+            if len(agent_analysis.get('action_plan', [])) > 0:
+                print("\n  Recommended Actions (use --fix to apply):")
+                for action in agent_analysis['action_plan']:
+                    # Convert "applying" to "recommend applying" or "would apply"
+                    action_text = action.replace("applying", "would apply").replace("Normalize", "Recommend normalizing")
+                    print(f"    • {action_text}")
+        
+        # Debug: Print detected issues breakdown
+        if len(agent_analysis.get('issues', [])) > 0:
+            print("\n  Detected Issues Breakdown:")
+            issue_types = {}
+            for issue in agent_analysis['issues']:
+                issue_type = issue['type']
+                if issue_type not in issue_types:
+                    issue_types[issue_type] = []
+                issue_types[issue_type].append(issue)
             
-            print("  Agent Summary:")
-            print(f"  {agent_analysis['summary']}")
-            if len(agent_analysis['decisions']) > 0:
-                print("\n  Decisions:")
-                for decision in agent_analysis['decisions']:
-                    print(f"    • {decision}")
+            for issue_type, issue_list in issue_types.items():
+                total_affected = sum(iss.get('affected_count', 0) for iss in issue_list)
+                print(f"    - {issue_type}: {total_affected} images affected")
+        
+        if not args.fix:
+            print("\n  ℹ To apply these fixes, run with --fix flag:")
+            print(f"     python main.py --dataset {args.dataset} --fix")
         print()
     except Exception as e:
         print(f"  ✗ Error in agent analysis: {e}")
@@ -147,7 +172,9 @@ def main():
                 brightness_scores=metrics_data['brightness_scores'],
                 blur_scores=metrics_data['blur_scores'],
                 noise_scores=metrics_data['noise_scores'],
-                class_distribution=class_distribution
+                class_distribution=class_distribution,
+                contrast_scores=contrast_scores if contrast_scores else None,
+                saturation_scores=saturation_scores if saturation_scores else None
             )
             print()
         except Exception as e:
@@ -280,6 +307,40 @@ def main():
         print(f"  ✗ Error generating reports: {e}")
         print()
     
+    # Step 7: Model evaluation (if requested)
+    evaluation_results = None
+    if args.evaluate and args.fix:
+        print("\nStep 7: Model evaluation...")
+        try:
+            from model_evaluator import ModelEvaluator
+            evaluator = ModelEvaluator()
+            evaluation_results = evaluator.compare_datasets(
+                original_path=args.dataset,
+                cleaned_path="cleaned_dataset",
+                num_epochs=args.eval_epochs,
+                batch_size=32
+            )
+            
+            if evaluation_results['success']:
+                # Update report with evaluation results
+                if 'evaluation' not in agent_analysis:
+                    agent_analysis['evaluation'] = {}
+                agent_analysis['evaluation'] = {
+                    'original_accuracy': evaluation_results['original']['test_accuracy'],
+                    'cleaned_accuracy': evaluation_results['cleaned']['test_accuracy'],
+                    'improvement': evaluation_results['improvement'],
+                    'improvement_percent': evaluation_results['improvement_percent'],
+                    'justified': evaluation_results['justified']
+                }
+        except ImportError:
+            print(f"  ✗ PyTorch not installed. Install with: pip install torch torchvision")
+        except Exception as e:
+            print(f"  ✗ Error in model evaluation: {e}")
+            print()
+    elif args.evaluate and not args.fix:
+        print("\n⚠ Model evaluation requires --fix flag (needs cleaned dataset)")
+        print("  Run with: python main.py --dataset <path> --fix --evaluate")
+    
     # Final summary
     print("=" * 80)
     print("AUDIT COMPLETE")
@@ -289,6 +350,8 @@ def main():
         print(f"Cleaned dataset saved to: cleaned_dataset/")
         if after_metrics:
             print(f"Before/after comparison included in reports")
+        if evaluation_results and evaluation_results.get('success'):
+            print(f"Model evaluation: {evaluation_results['improvement']:+.2f}% accuracy improvement")
     print()
 
 
