@@ -11,7 +11,6 @@ An intelligent agent that automatically audits and preprocesses image datasets *
 - **Brightness Analysis**: Mean pixel intensity analysis with automatic correction
 - **Contrast Evaluation**: Standard deviation of pixel intensities (low/high contrast detection)
 - **Saturation Analysis**: Mean saturation value detection (under/over-saturated)
-- **Corruption Detection**: Identifies corrupted images (NaNs, extreme values)
 - **Class Distribution**: Detects class imbalance issues
 - **Consistent Image Sizing**: Automatically resizes all images to 224x224 with aspect ratio preservation
 
@@ -133,8 +132,8 @@ After running the audit, you'll find:
    - `class_distribution.png`
    - `blur_distribution.png`
    - `noise_distribution.png`
-   - `contrast_distribution.png` (NEW)
-   - `saturation_distribution.png` (NEW)
+   - `contrast_distribution.png`
+   - `saturation_distribution.png` 
 
 3. **Cleaned Dataset** (in `cleaned_dataset/` directory, if `--fix` is used):
    - All images resized to 224x224
@@ -166,7 +165,7 @@ After running the audit, you'll find:
 3. **Agent Analysis**: Rule-based agent analyzes statistics and makes decisions
 4. **Visualization**: Generates plots for visual inspection
 5. **Preprocessing** (optional, with `--fix`):
-   - Removes corrupted and severely blurry images
+   - Removes severely blurry images
    - Applies fixes iteratively with verification loop
    - Resizes all images to 224x224 (consistent size)
    - Augments minority classes to balance distribution
