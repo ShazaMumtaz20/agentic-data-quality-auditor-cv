@@ -5,6 +5,7 @@ Example usage of the Agentic Data Quality Auditor for Computer Vision.
 
 import argparse
 from pathlib import Path
+import sys
 from data_loader import DataLoader
 from quality_metrics import QualityMetrics
 from agent import QualityAgent
@@ -13,7 +14,17 @@ from fixer import ImageFixer
 from report_generator import ReportGenerator
 from preprocessor import DatasetPreprocessor
 # ModelEvaluator imported conditionally when --evaluate is used
-
+def safe_print(*args, **kwargs):
+    """
+    Print that won't crash on Windows cp1252 console.
+    Replaces unencodable characters with '?'.
+    """
+    text = " ".join(str(a) for a in args)
+    try:
+        print(text, **kwargs)
+    except UnicodeEncodeError:
+        encoded = text.encode(sys.stdout.encoding or "cp1252", errors="replace")
+        print(encoded.decode(sys.stdout.encoding or "cp1252", errors="replace"), **kwargs)
 
 def main():
     """
@@ -71,11 +82,11 @@ def main():
         class_distribution = data_loader.get_class_distribution()
         total_images = data_loader.get_total_images()
         
-        print(f"  ✓ Loaded {total_images} images from {len(class_distribution)} classes")
+        print(f"  [OK] Loaded {total_images} images from {len(class_distribution)} classes")
         print(f"  Classes: {', '.join(sorted(class_distribution.keys()))}")
         print()
     except Exception as e:
-        print(f"  ✗ Error loading dataset: {e}")
+        print(f"  [ERROR] Error loading dataset: {e}")
         return
     
     # Step 2: Compute quality metrics
@@ -86,7 +97,7 @@ def main():
         metrics_stats = quality_metrics.get_statistics()
         print()
     except Exception as e:
-        print(f"  ✗ Error computing metrics: {e}")
+        safe_print(f"  ✗ Error computing metrics: {e}")
         return
     
     # Step 3: Agent analysis and decision making
@@ -111,23 +122,24 @@ def main():
             corruption_flags=corruption_flags if corruption_flags else None
         )
         
-        print("  Agent Summary:")
-        print(f"  {agent_analysis['summary']}")
+        print("Agent Summary:")
+        safe_print(f"  {agent_analysis['summary']}")
+
         
         if args.fix:
             # When --fix is used, show actions that will be applied
             if len(agent_analysis.get('action_plan', [])) > 0:
                 print("\n  Action Plan (will be applied):")
                 for action in agent_analysis['action_plan']:
-                    print(f"    • {action}")
+                    safe_print(f"    • {action}")
             if len(agent_analysis['decisions']) > 0:
-                print("\n  Decisions:")
+                safe_print("\n  Decisions:")
                 for decision in agent_analysis['decisions']:
-                    print(f"    • {decision}")
+                    safe_print(f"    • {decision}")
         else:
             # When --fix is NOT used, show recommendations only (use action_plan, skip decisions to avoid duplication)
             if len(agent_analysis.get('action_plan', [])) > 0:
-                print("\n  Recommended Actions (use --fix to apply):")
+                safe_print("\n  Recommended Actions (use --fix to apply):")
                 for action in agent_analysis['action_plan']:
                     # Convert "applying" to "recommend applying" or "would apply"
                     action_text = action.replace("applying", "would apply").replace("Normalize", "Recommend normalizing")
@@ -148,11 +160,11 @@ def main():
                 print(f"    - {issue_type}: {total_affected} images affected")
         
         if not args.fix:
-            print("\n  ℹ To apply these fixes, run with --fix flag:")
+            safe_print("\n  ℹ To apply these fixes, run with --fix flag:")
             print(f"     python main.py --dataset {args.dataset} --fix")
         print()
     except Exception as e:
-        print(f"  ✗ Error in agent analysis: {e}")
+        safe_print(f"  [ERROR] Error in agent analysis: {e}")
         return
     
     # Store before metrics for comparison
@@ -178,7 +190,7 @@ def main():
             )
             print()
         except Exception as e:
-            print(f"  ✗ Error generating visualizations: {e}")
+            safe_print(f"  ✗ Error generating visualizations: {e}")
             print()
     
     # Step 5: Apply fixes (if requested)
@@ -196,21 +208,21 @@ def main():
                     image_paths=metrics_data['image_paths']
                 )
                 
-                print(f"\n  ✓ Applied fixes to {fixed_count} images")
-                print(f"  ✓ Copied {skipped} unchanged images")
+                safe_print(f"\n  ✓ Applied fixes to {fixed_count} images")
+                safe_print(f"  ✓ Copied {skipped} unchanged images")
                 if excluded_count > 0:
-                    print(f"  ⚠ Excluded {excluded_count} images (irreversible defects)")
-                print(f"  ✓ Cleaned dataset saved to: cleaned_dataset/")
+                    safe_print(f"  ⚠ Excluded {excluded_count} images (irreversible defects)")
+                safe_print(f"  ✓ Cleaned dataset saved to: cleaned_dataset/")
                 
                 # Show excluded images summary if any
                 if 'excluded_images' in agent_analysis and len(agent_analysis['excluded_images']) > 0:
-                    print(f"\n  Excluded Images Summary:")
+                    safe_print(f"\n  Excluded Images Summary:")
                     excluded_by_class = {}
                     for ex in agent_analysis['excluded_images']:
                         class_name = ex.get('class', 'unknown')
                         excluded_by_class[class_name] = excluded_by_class.get(class_name, 0) + 1
                     for class_name, count in excluded_by_class.items():
-                        print(f"    - {class_name}: {count} images excluded")
+                        safe_print(f"    - {class_name}: {count} images excluded")
                 
                 # Step 5b: Re-analyze cleaned dataset
                 print("\nStep 5b: Re-analyzing cleaned dataset...")
@@ -260,13 +272,13 @@ def main():
                     print()
                     
                 except Exception as e:
-                    print(f"  ✗ Error re-analyzing cleaned dataset: {e}")
-                    print("  (Continuing with before metrics only)")
+                    safe_print(f"  ✗ Error re-analyzing cleaned dataset: {e}")
+                    safe_print("  (Continuing with before metrics only)")
             else:
-                print("  No actions to apply - dataset quality is acceptable")
+                safe_print("  No actions to apply - dataset quality is acceptable")
             print()
         except Exception as e:
-            print(f"  ✗ Error applying fixes: {e}")
+            safe_print(f"  ✗ Error applying fixes: {e}")
             print()
     
     # Step 6: Generate reports
@@ -335,11 +347,11 @@ def main():
         except ImportError:
             print(f"  ✗ PyTorch not installed. Install with: pip install torch torchvision")
         except Exception as e:
-            print(f"  ✗ Error in model evaluation: {e}")
+            safe_print(f"  ✗ Error in model evaluation: {e}")
             print()
     elif args.evaluate and not args.fix:
-        print("\n⚠ Model evaluation requires --fix flag (needs cleaned dataset)")
-        print("  Run with: python main.py --dataset <path> --fix --evaluate")
+        safe_print("\n⚠ Model evaluation requires --fix flag (needs cleaned dataset)")
+        safe_print("  Run with: python main.py --dataset <path> --fix --evaluate")
     
     # Final summary
     print("=" * 80)
@@ -351,7 +363,7 @@ def main():
         if after_metrics:
             print(f"Before/after comparison included in reports")
         if evaluation_results and evaluation_results.get('success'):
-            print(f"Model evaluation: {evaluation_results['improvement']:+.2f}% accuracy improvement")
+            safe_print(f"Model evaluation: {evaluation_results['improvement']:+.2f}% accuracy improvement")
     print()
 
 

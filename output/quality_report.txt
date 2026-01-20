@@ -1,11 +1,11 @@
 ================================================================================
 AGENTIC DATA QUALITY AUDITOR FOR COMPUTER VISION
 ================================================================================
-Generated: 2026-01-20 01:46:14
+Generated: 2026-01-20 22:49:07
 
 DATASET SUMMARY
 --------------------------------------------------------------------------------
-Dataset Path: dataset
+Dataset Path: D:\Asad Jajja\CV Project\agentic-data-quality-auditor-cv\dataset
 Total Images: 4822
 Number of Classes: 2
 

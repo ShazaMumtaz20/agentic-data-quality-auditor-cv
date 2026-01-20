@@ -131,20 +131,20 @@ class ModelEvaluator:
     """
     Evaluates model performance on cleaned vs uncleaned datasets.
     """
-    
-    def __init__(self, device: str = None):
+
+    def __init__(self, device: str = "cuda"):
         """
         Initialize evaluator.
-        
+
         Args:
-            device: Device to use ('cuda', 'cpu', or None for auto)
+            device: 'cuda' or 'cpu'
         """
-        if device is None:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            self.device = torch.device(device)
-        
+        if device == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested but not available. Install CUDA-enabled PyTorch or use device='cpu'.")
+
+        self.device = torch.device(device)
         print(f"Using device: {self.device}")
+
     
     def train_model(self, dataset_path: str, num_epochs: int = 5, 
                    batch_size: int = 32, learning_rate: float = 0.001) -> Dict:
