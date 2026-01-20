@@ -32,8 +32,7 @@ The system applies fixes iteratively with verification:
 - **Saturation Adjustment**: HSV-based saturation correction
 - **Image Resizing**: Consistent 224x224 size with padding (preserves aspect ratio)
 - **Class Imbalance Augmentation**: Automatic augmentation (flips, rotations, brightness jitter) for minority classes
-- **Corruption Handling**: Automatic removal of corrupted images
-
+  
 ### 4. **Visualization Module**
 Generates comprehensive visualizations:
 - Histogram of image brightness distribution (with threshold markers)
