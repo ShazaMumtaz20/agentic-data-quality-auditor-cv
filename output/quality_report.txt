@@ -1,130 +1,134 @@
 ================================================================================
 AGENTIC DATA QUALITY AUDITOR FOR COMPUTER VISION
 ================================================================================
-Generated: 2026-01-20 22:49:07
+Generated: 2026-04-27 01:39:12
 
 DATASET SUMMARY
 --------------------------------------------------------------------------------
-Dataset Path: D:\Asad Jajja\CV Project\agentic-data-quality-auditor-cv\dataset
-Total Images: 4822
+Dataset Path: ./dataset
+Total Images: 16522
 Number of Classes: 2
 
 CLASS DISTRIBUTION
 --------------------------------------------------------------------------------
-  happy: 860 images (17.8%)
-  sad: 1551 images (32.2%)
+  Happy: 3490 images (21.1%)
+  Sad: 4771 images (28.9%)
 
 QUALITY METRICS - BEFORE vs AFTER
 --------------------------------------------------------------------------------
 Blur Scores (Laplacian Variance):
-  Before - Mean: 2074.35
-  After  - Mean: 21.90 (-98.9%)
+  Before - Mean: 354.90
+  After  - Mean: 537.57 (+51.5%)
 
 Noise Scores:
-  Before - Mean: 14.35
-  After  - Mean: 4.78 (+66.7% reduction)
+  Before - Mean: 8.13
+  After  - Mean: 10.01 (-23.1% reduction)
 
 Brightness Scores (Mean Pixel Intensity):
-  Before - Mean: 124.03
-  After  - Mean: 126.49 (target: 128.0)
-  ✓ Improved: 3.97 → 1.51 deviation from target
+  Before - Mean: 114.95
+  After  - Mean: 108.70 (target: 128.0)
 
 Contrast Scores (Standard Deviation):
-  Before - Mean: 46.86
-  After  - Mean: 49.21 (+5.0%)
+  Before - Mean: 55.87
+  After  - Mean: 60.33 (+8.0%)
 
 Sharpness Scores (Laplacian Variance):
-  Before - Mean: 2074.35
-  After  - Mean: 21.90
+  Before - Mean: 354.90
+  After  - Mean: 537.57
 
 AGENT ANALYSIS
 --------------------------------------------------------------------------------
-Detected 9 issue(s):
-  1. [CRITICAL] 848 images are severely blurred and will be excluded
-  2. [MEDIUM] 784 images are noisy (24.1%)
-  3. [MEDIUM] 67 images are too dark (3.4%)
-  4. [MEDIUM] 186 images are too bright (6.1%)
-  5. [MEDIUM] 229 images have low contrast (15.3%)
-  6. [MEDIUM] 109 images have high contrast (3.5%)
-  7. [MEDIUM] 1547 images are over-sharpened (47.5%)
-  8. [LOW] 590 images are under-saturated
-  9. [MEDIUM] 72 images are over-saturated
+Detected 10 issue(s):
+  1. [CRITICAL] 1439 images are severely blurred and will be excluded
+  2. [MEDIUM] 163 images are noisy (1.7%)
+  3. [MEDIUM] 173 images are too dark (2.0%)
+  4. [MEDIUM] 25 images are too bright (0.3%)
+  5. [MEDIUM] 176 images have low contrast (2.1%)
+  6. [MEDIUM] 279 images have high contrast (3.1%)
+  7. [MEDIUM] 1942 images are over-sharpened (20.0%)
+  8. [LOW] 431 images are under-saturated
+  9. [MEDIUM] 32 images are over-saturated
+  10. [HIGH] Classes are imbalanced after cleaning (min=3490, max=4771, target=4130)
 
-⚠ 848 images will be EXCLUDED from cleaned dataset (irreversible defects)
+⚠ 1439 images will be EXCLUDED from cleaned dataset (irreversible defects)
 
 Action Plan:
-  1. EXCLUDE 848 blurry images (blur score < 100.0)
-  2. Apply conservative bilateral denoising to 784 noisy images
-  3. Normalize brightness to 128.0 for 67 dark images
-  4. Normalize brightness to 128.0 for 186 bright images
-  5. Apply CLAHE contrast enhancement to 229 images
-  6. Reduce contrast for 109 images
-  7. Normalize sharpness for 1547 over-sharpened images
-  8. Increase saturation for 590 under-saturated images
-  9. Reduce saturation for 72 over-saturated images
+  1. EXCLUDE 1439 blurry images (blur score < 100.0)
+  2. Apply conservative bilateral denoising to 163 noisy images
+  3. Normalize brightness to 128.0 for 173 dark images
+  4. Normalize brightness to 128.0 for 25 bright images
+  5. Apply CLAHE contrast enhancement to 176 images
+  6. Reduce contrast for 279 images
+  7. Normalize sharpness for 1942 over-sharpened images
+  8. Increase saturation for 431 under-saturated images
+  9. Reduce saturation for 32 over-saturated images
+  10. RECOMMENDATION: Re-run with --fix --balance --balance-strategy hybrid
 
 Agent Decisions:
-  1. 848 severely blurred images → EXCLUDING from cleaned dataset (blur is irreversible)
-  2. 784 images are noisy → applying conservative denoising
-  3. 67 images too dark → applying brightness normalization
-  4. 186 images too bright → applying brightness normalization
-  5. 229 images have low contrast → applying CLAHE enhancement
-  6. 109 images have high contrast → applying contrast reduction
-  7. 1547 images are over-sharpened → applying Gaussian smoothing
-  8. 590 images are under-saturated → increasing saturation
-  9. 72 images are over-saturated → reducing saturation
+  1. 1439 severely blurred images → EXCLUDING from cleaned dataset (blur is irreversible)
+  2. 163 images are noisy → applying conservative denoising
+  3. 173 images too dark → applying brightness normalization
+  4. 25 images too bright → applying brightness normalization
+  5. 176 images have low contrast → applying CLAHE enhancement
+  6. 279 images have high contrast → applying contrast reduction
+  7. 1942 images are over-sharpened → applying Gaussian smoothing
+  8. 431 images are under-saturated → increasing saturation
+  9. 32 images are over-saturated → reducing saturation
+  10. Class imbalance detected -> recommend running auto-balance (hybrid)
 
 DETECTED ISSUES
 --------------------------------------------------------------------------------
 1. [CRITICAL] BLUR_SEVERE
-   848 images are severely blurred and will be excluded
+   1439 images are severely blurred and will be excluded
 
 2. [MEDIUM] NOISE
-   784 images are noisy (24.1%)
+   163 images are noisy (1.7%)
 
 3. [MEDIUM] BRIGHTNESS_DARK
-   67 images are too dark (3.4%)
+   173 images are too dark (2.0%)
 
 4. [MEDIUM] BRIGHTNESS_BRIGHT
-   186 images are too bright (6.1%)
+   25 images are too bright (0.3%)
 
 5. [MEDIUM] CONTRAST_LOW
-   229 images have low contrast (15.3%)
+   176 images have low contrast (2.1%)
 
 6. [MEDIUM] CONTRAST_HIGH
-   109 images have high contrast (3.5%)
+   279 images have high contrast (3.1%)
 
 7. [MEDIUM] SHARPNESS
-   1547 images are over-sharpened (47.5%)
+   1942 images are over-sharpened (20.0%)
 
 8. [LOW] LOW_SATURATION
-   590 images are under-saturated
+   431 images are under-saturated
 
 9. [MEDIUM] HIGH_SATURATION
-   72 images are over-saturated
+   32 images are over-saturated
+
+10. [HIGH] CLASS_IMBALANCE
+   Classes are imbalanced after cleaning (min=3490, max=4771, target=4130)
 
 Sharpness Scores (Laplacian Variance):
-  Mean: 21.90
-  Std:  32.26
-  Min:  3.01
-  Max:  552.89
-  Median: 12.40
+  Mean: 537.57
+  Std:  673.53
+  Min:  3.94
+  Max:  11012.35
+  Median: 314.78
 
 DATASET CLEANING ACTIONS
 --------------------------------------------------------------------------------
-Number of images fixed: 1984
-Number of images EXCLUDED: 848 (irreversible defects)
+Number of images fixed: 2689
+Number of images EXCLUDED: 1439 (irreversible defects)
 
 Excluded Images by Class:
-  happy: 420 images
-  sad: 428 images
+  Happy: 1439 images
 Cleaned dataset saved to: cleaned_dataset/
 
 IMPROVEMENT SUMMARY
 --------------------------------------------------------------------------------
-Blur: 2074.35 → 21.90 (-98.9%)
-Noise: 14.35 → 4.78 (+66.7% reduction)
-Brightness: 124.03 → 126.49 (target: 128.0)
+Blur: 354.90 → 537.57 (+51.5%)
+Noise: 8.13 → 10.01 (-23.1% reduction)
+Brightness: 114.95 → 108.70 (target: 128.0)
 
 ================================================================================
 End of Report

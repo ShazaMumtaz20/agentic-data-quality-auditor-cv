@@ -61,6 +61,25 @@ def main():
         help='Evaluate model performance on cleaned vs uncleaned datasets'
     )
     parser.add_argument(
+        '--balance',
+        action='store_true',
+        help='Automatically balance class counts in the cleaned dataset'
+    )
+    parser.add_argument(
+        '--balance-strategy',
+        type=str,
+        default='hybrid',
+        choices=['undersample', 'oversample', 'hybrid'],
+        help='Balancing strategy to use when --balance is enabled'
+    )
+    parser.add_argument(
+        '--model',
+        type=str,
+        default='cnn',
+        choices=['cnn', 'resnet', 'efficientnet', 'convnext', 'regnet', 'nfnet'],
+        help='Model type to use'
+    )
+    parser.add_argument(
         '--eval-epochs',
         type=int,
         default=5,
@@ -119,7 +138,9 @@ def main():
             class_distribution=class_distribution,
             contrast_scores=contrast_scores if contrast_scores else None,
             saturation_scores=saturation_scores if saturation_scores else None,
-            corruption_flags=corruption_flags if corruption_flags else None
+            corruption_flags=corruption_flags if corruption_flags else None,
+            auto_balance=args.balance,
+            balance_strategy=args.balance_strategy
         )
         
         print("Agent Summary:")
@@ -161,11 +182,16 @@ def main():
         
         if not args.fix:
             safe_print("\n  ℹ To apply these fixes, run with --fix flag:")
-            print(f"     python main.py --dataset {args.dataset} --fix")
+            balance_hint = " --balance" if args.balance else ""
+            strategy_hint = f" --balance-strategy {args.balance_strategy}" if args.balance else ""
+            print(f"     python main.py --dataset {args.dataset} --fix{balance_hint}{strategy_hint}")
         print()
     except Exception as e:
         safe_print(f"  [ERROR] Error in agent analysis: {e}")
         return
+
+    if args.balance and not args.fix:
+        safe_print("\n  [WARN] Auto-balance only runs together with --fix")
     
     # Store before metrics for comparison
     before_metrics = {
@@ -330,7 +356,8 @@ def main():
                 original_path=args.dataset,
                 cleaned_path="cleaned_dataset",
                 num_epochs=args.eval_epochs,
-                batch_size=32
+                batch_size=32,
+                model_type=args.model
             )
             
             if evaluation_results['success']:
@@ -338,8 +365,13 @@ def main():
                 if 'evaluation' not in agent_analysis:
                     agent_analysis['evaluation'] = {}
                 agent_analysis['evaluation'] = {
+                    'model_type': args.model,
                     'original_accuracy': evaluation_results['original']['test_accuracy'],
                     'cleaned_accuracy': evaluation_results['cleaned']['test_accuracy'],
+                    'original_macro_f1': evaluation_results['original']['macro_f1'],
+                    'cleaned_macro_f1': evaluation_results['cleaned']['macro_f1'],
+                    'original_confusion_matrix': evaluation_results['original']['confusion_matrix'],
+                    'cleaned_confusion_matrix': evaluation_results['cleaned']['confusion_matrix'],
                     'improvement': evaluation_results['improvement'],
                     'improvement_percent': evaluation_results['improvement_percent'],
                     'justified': evaluation_results['justified']
@@ -360,6 +392,8 @@ def main():
     print(f"Reports saved to: {args.output}/")
     if args.fix:
         print(f"Cleaned dataset saved to: cleaned_dataset/")
+        if args.balance:
+            print(f"Auto-balance strategy applied: {args.balance_strategy}")
         if after_metrics:
             print(f"Before/after comparison included in reports")
         if evaluation_results and evaluation_results.get('success'):

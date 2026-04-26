@@ -6,6 +6,7 @@ Applies safe fixes to images: denoising, brightness normalization, and sharpenin
 import cv2
 import numpy as np
 import shutil
+import random
 from pathlib import Path
 from typing import List, Tuple, Dict
 from data_loader import DataLoader
@@ -748,7 +749,112 @@ class ImageFixer:
             image = self.sharpen_image(image, strength=sharpen_strength)
         
         return image
-    
+
+    def _get_output_class_images(self) -> Dict[str, List[Path]]:
+        """Collect saved image paths per class from the cleaned dataset output."""
+        valid_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+        class_images = {}
+
+        for class_dir in sorted(self.output_dir.iterdir()):
+            if not class_dir.is_dir():
+                continue
+
+            images = [
+                path for path in sorted(class_dir.iterdir())
+                if path.is_file() and path.suffix.lower() in valid_extensions
+            ]
+            if images:
+                class_images[class_dir.name] = images
+
+        return class_images
+
+    def balance_dataset(self, strategy: str = 'hybrid', target_count: int = None) -> Dict:
+        """
+        Balance the cleaned dataset after quality fixes have been applied.
+
+        Strategies:
+        - undersample: reduce all classes to the minority count
+        - oversample: augment all classes to the majority count
+        - hybrid: undersample majorities and augment minorities toward the median count
+        """
+        rng = random.Random(42)
+        class_images = self._get_output_class_images()
+
+        if len(class_images) < 2:
+            return {
+                'applied': False,
+                'strategy': strategy,
+                'target_count': 0,
+                'before_distribution': {k: len(v) for k, v in class_images.items()},
+                'after_distribution': {k: len(v) for k, v in class_images.items()},
+                'removed': 0,
+                'augmented': 0,
+            }
+
+        before_distribution = {class_name: len(images) for class_name, images in class_images.items()}
+        counts = list(before_distribution.values())
+
+        if target_count is None:
+            if strategy == 'undersample':
+                target_count = min(counts)
+            elif strategy == 'oversample':
+                target_count = max(counts)
+            else:
+                target_count = max(1, int(round(float(np.median(counts)))))
+
+        removed_count = 0
+        augmented_count = 0
+
+        # Reduce majority classes first.
+        if strategy in {'undersample', 'hybrid'}:
+            for class_name, images in class_images.items():
+                if len(images) <= target_count:
+                    continue
+
+                to_remove = rng.sample(images, len(images) - target_count)
+                for image_path in to_remove:
+                    image_path.unlink(missing_ok=True)
+                    removed_count += 1
+
+        class_images = self._get_output_class_images()
+
+        # Then grow minority classes if the chosen strategy requires it.
+        if strategy in {'oversample', 'hybrid'}:
+            for class_name, images in list(class_images.items()):
+                current_count = len(images)
+                if current_count == 0 or current_count >= target_count:
+                    continue
+
+                for aug_index in range(target_count - current_count):
+                    source_path = rng.choice(images)
+                    image = self.data_loader.load_image(str(source_path))
+                    augmented = self.augment_image(image, augmentation_type='random')
+                    augmented = self.resize_image(augmented, target_size=(224, 224))
+
+                    aug_path = source_path.parent / f"{source_path.stem}_balanced_{aug_index}{source_path.suffix}"
+                    while aug_path.exists():
+                        aug_index += 1
+                        aug_path = source_path.parent / f"{source_path.stem}_balanced_{aug_index}{source_path.suffix}"
+
+                    augmented_bgr = cv2.cvtColor(augmented, cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(str(aug_path), augmented_bgr)
+                    augmented_count += 1
+
+        after_distribution = {
+            class_name: len(images)
+            for class_name, images in self._get_output_class_images().items()
+        }
+
+        return {
+            'applied': True,
+            'strategy': strategy,
+            'target_count': target_count,
+            'before_distribution': before_distribution,
+            'after_distribution': after_distribution,
+            'removed': removed_count,
+            'augmented': augmented_count,
+        }
+
     def apply_agent_actions(self, actions: List[Dict], image_paths: List[str]) -> Tuple[int, int, int, List[str]]:
         """
         Apply fixes based on agent decisions.
@@ -764,12 +870,17 @@ class ImageFixer:
         skipped_count = 0
         excluded_count = 0
         applied_fixes_log = []
+        balance_action = None
         
         # Track which images need which fixes
         image_fixes = {}  # {image_index: [list of fixes to apply]}
         
         for action in actions:
             action_type = action['type']
+            if action_type == 'balance_dataset':
+                balance_action = action
+                continue
+
             indices = action['indices']
             reason = action.get('reason', '')
             
@@ -963,6 +1074,25 @@ class ImageFixer:
                 continue
         
         excluded_count = len(excluded_indices)
+        if balance_action is not None:
+            print("Applying dataset balancing...")
+            balance_summary = self.balance_dataset(
+                strategy=balance_action.get('strategy', 'hybrid'),
+                target_count=balance_action.get('target_count')
+            )
+            if balance_summary.get('applied'):
+                applied_fixes_log.append(
+                    "Balanced dataset "
+                    f"using {balance_summary['strategy']} strategy to target "
+                    f"{balance_summary['target_count']} images per class "
+                    f"(removed {balance_summary['removed']}, augmented {balance_summary['augmented']})"
+                )
+                print(
+                    "  Balanced dataset to target "
+                    f"{balance_summary['target_count']} images per class "
+                    f"using {balance_summary['strategy']}"
+                )
+
         print(f"Fix complete! Fixed {fixed_count} images, copied {len(unchanged_indices)} unchanged images, excluded {excluded_count} images.")
         return fixed_count, skipped_count, excluded_count, applied_fixes_log
     

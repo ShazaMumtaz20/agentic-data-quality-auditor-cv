@@ -205,9 +205,18 @@ class ReportGenerator:
             report.append("MODEL EVALUATION RESULTS")
             report.append("-" * 80)
             eval_data = agent_analysis['evaluation']
+            if 'model_type' in eval_data:
+                report.append(f"Model: {eval_data['model_type']}")
             report.append(f"Original Dataset Accuracy: {eval_data['original_accuracy']:.2f}%")
             report.append(f"Cleaned Dataset Accuracy: {eval_data['cleaned_accuracy']:.2f}%")
+            if 'original_macro_f1' in eval_data and 'cleaned_macro_f1' in eval_data:
+                report.append(f"Original Macro F1: {eval_data['original_macro_f1']:.4f}")
+                report.append(f"Cleaned Macro F1: {eval_data['cleaned_macro_f1']:.4f}")
             report.append(f"Improvement: {eval_data['improvement']:+.2f}% ({eval_data['improvement_percent']:+.1f}% relative)")
+            if 'original_confusion_matrix' in eval_data:
+                report.append(f"Original Confusion Matrix: {eval_data['original_confusion_matrix']}")
+            if 'cleaned_confusion_matrix' in eval_data:
+                report.append(f"Cleaned Confusion Matrix: {eval_data['cleaned_confusion_matrix']}")
             if eval_data['justified']:
                 report.append("✓ Preprocessing justified - cleaned dataset performs better")
             else:
@@ -315,10 +324,13 @@ class ReportGenerator:
         # Add action plan if available
         if 'action_plan' in agent_analysis:
             report['agent_analysis']['action_plan'] = agent_analysis['action_plan']
-        
+
         # Add recommendations if available
         if 'recommendations' in agent_analysis:
             report['agent_analysis']['recommendations'] = agent_analysis['recommendations']
+
+        if 'evaluation' in agent_analysis:
+            report['agent_analysis']['evaluation'] = agent_analysis['evaluation']
         
         # Add before/after comparison if available
         if before_metrics and after_metrics:

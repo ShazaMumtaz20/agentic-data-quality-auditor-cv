@@ -3,7 +3,7 @@
 # - Centered header + slogan
 # - Form-style steps
 # - Required fields enforced (dataset path + output dir)
-# - Strict dataset validation (must contain happy/ and sad/)
+# - Generic ImageFolder validation (works with any class names)
 # - Runs REAL agent via main.py using the SAME venv python (sys.executable)
 # - Shows report + plots
 # - Download buttons: TXT report, JSON report, cleaned dataset ZIP (if --fix)
@@ -38,8 +38,8 @@ def validate_dataset_structure(dataset_path: str):
     Returns:
       ok (bool),
       msg (str),
-      happy_count (int),
-      sad_count (int)
+      class_count (int),
+      image_count (int)
     """
     ds = Path((dataset_path or "").strip().strip('"'))
 
@@ -52,32 +52,35 @@ def validate_dataset_structure(dataset_path: str):
     if not ds.is_dir():
         return False, f"Dataset path is not a folder: {ds}", 0, 0
 
-    happy_dir = ds / "happy"
-    sad_dir = ds / "sad"
+    class_dirs = sorted([path for path in ds.iterdir() if path.is_dir()])
+    if len(class_dirs) < 2:
+        return False, "Dataset must contain at least 2 class folders.", 0, 0
 
-    if not happy_dir.exists() or not happy_dir.is_dir():
-        return False, "Missing folder: dataset/happy", 0, 0
+    class_counts = {}
+    for class_dir in class_dirs:
+        image_count = _count_images(class_dir)
+        if image_count == 0:
+            return False, f"No images found inside dataset/{class_dir.name}", len(class_dirs), 0
+        class_counts[class_dir.name] = image_count
 
-    if not sad_dir.exists() or not sad_dir.is_dir():
-        return False, "Missing folder: dataset/sad", 0, 0
-
-    happy_count = _count_images(happy_dir)
-    sad_count = _count_images(sad_dir)
-
-    if happy_count == 0:
-        return False, "No images found inside dataset/happy", happy_count, sad_count
-    if sad_count == 0:
-        return False, "No images found inside dataset/sad", happy_count, sad_count
+    total_images = sum(class_counts.values())
+    preview_lines = [
+        f"{class_name}: {count} images"
+        for class_name, count in list(class_counts.items())[:5]
+    ]
+    if len(class_counts) > 5:
+        preview_lines.append(f"... and {len(class_counts) - 5} more classes")
 
     msg = (
-        f"✅ Dataset looks valid.\n"
-        f"• happy: {happy_count} images\n"
-        f"• sad: {sad_count} images"
+        "Dataset looks valid.\n"
+        f"Classes: {len(class_counts)}\n"
+        f"Images: {total_images}\n"
+        + "\n".join(f"- {line}" for line in preview_lines)
     )
-    return True, msg, happy_count, sad_count
+    return True, msg, len(class_counts), total_images
 
 
-def run_agent_cli_stream(dataset_path, output_dir, do_fix, do_eval, eval_epochs, no_viz):
+def run_agent_cli_stream(dataset_path, output_dir, do_fix, do_balance, balance_strategy, do_eval, eval_epochs, no_viz):
     dataset_path = (dataset_path or "").strip().strip('"')
     output_dir = (output_dir or "output").strip().strip('"')
 
@@ -96,6 +99,8 @@ def run_agent_cli_stream(dataset_path, output_dir, do_fix, do_eval, eval_epochs,
     ]
     if do_fix:
         cmd.append("--fix")
+    if do_balance:
+        cmd.extend(["--balance", "--balance-strategy", balance_strategy])
     if do_eval:
         cmd.extend(["--evaluate", "--eval-epochs", str(int(eval_epochs))])
     if no_viz:
@@ -186,8 +191,16 @@ def build_app():
 
             with gr.Row():
                 do_fix = gr.Checkbox(label="Apply auto-fixes", value=False)
+                do_balance = gr.Checkbox(label="Auto-balance classes", value=False)
                 do_eval = gr.Checkbox(label="Evaluate model", value=False)
                 no_viz = gr.Checkbox(label="Skip visualizations", value=False)
+
+            balance_strategy = gr.Dropdown(
+                label="Balance strategy",
+                choices=["undersample", "oversample", "hybrid"],
+                value="hybrid",
+                visible=False,
+            )
 
             eval_epochs = gr.Slider(
                 label="Evaluation epochs",
@@ -201,7 +214,11 @@ def build_app():
         def toggle_epochs(evaluate_checked):
             return gr.update(visible=bool(evaluate_checked))
 
+        def toggle_balance(balance_checked):
+            return gr.update(visible=bool(balance_checked))
+
         do_eval.change(toggle_epochs, inputs=[do_eval], outputs=[eval_epochs])
+        do_balance.change(toggle_balance, inputs=[do_balance], outputs=[balance_strategy])
 
         # STEP 3
         with gr.Group():
@@ -255,20 +272,16 @@ def build_app():
                 json_download = gr.File(label="Download report (JSON)")
                 cleaned_zip = gr.File(label="Download cleaned dataset (ZIP)")
 
-        # Run action
-        def on_run(ds_path, out_dir, fix, evaluate, epochs, skip_viz):
-            return run_agent_cli_stream(ds_path, out_dir, fix, evaluate, epochs, skip_viz)
-
         run_btn.click(
-    fn=run_agent_cli_stream,
-    inputs=[dataset_path, output_dir, do_fix, do_eval, eval_epochs, no_viz],
-    outputs=[report_out, plots_out, txt_download, json_download, cleaned_zip],
+            fn=run_agent_cli_stream,
+            inputs=[dataset_path, output_dir, do_fix, do_balance, balance_strategy, do_eval, eval_epochs, no_viz],
+            outputs=[report_out, plots_out, txt_download, json_download, cleaned_zip],
         )
 
         gr.Markdown(
             """
             <div style="margin-top: 14px; font-size: 13px; opacity: 0.9;">
-              <b>Required structure:</b> <code>dataset/happy/*</code> and <code>dataset/sad/*</code><br/>
+              <b>Required structure:</b> ImageFolder format like <code>dataset/class_a/*</code>, <code>dataset/class_b/*</code>, ...<br/>
               Tip: If evaluation is enabled and CUDA is available, it will use GPU automatically.
             </div>
             """

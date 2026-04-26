@@ -28,6 +28,7 @@ class QualityAgent:
         self.MAX_CLASS_REMOVAL_RATIO = 0.4  # Don't remove more than 40% from any class
         self.LOW_SATURATION_THRESHOLD = 30.0  # Saturation below this = under-saturated
         self.HIGH_SATURATION_THRESHOLD = 200.0  # Saturation above this = over-saturated
+        self.BALANCE_TOLERANCE = 0  # Classes must match exactly after balancing
         
     def analyze(self, metrics_stats: Dict, class_distribution: Dict[str, int]) -> Dict:
         """
@@ -175,7 +176,9 @@ class QualityAgent:
                       class_distribution: Dict[str, int],
                       contrast_scores: Optional[List[float]] = None,
                       saturation_scores: Optional[List[float]] = None,
-                      corruption_flags: Optional[List[bool]] = None) -> Dict:
+                      corruption_flags: Optional[List[bool]] = None,
+                      auto_balance: bool = False,
+                      balance_strategy: str = 'hybrid') -> Dict:
         """
         Analyze dataset and decide on concrete actions following realistic ML engineering rules.
         Blur is irreversible - exclude severely blurred images instead of trying to fix.
@@ -544,29 +547,72 @@ class QualityAgent:
                 })
                 action_plan.append(f"Reduce saturation for {len(high_sat_indices)} over-saturated images")
         
-        # Analyze class distribution (only recommend, don't auto-fix)
-        if len(class_distribution) > 0:
-            class_counts = list(class_distribution.values())
-            total_images = sum(class_counts)
-            avg_count = total_images / len(class_distribution)
-            
-            imbalanced_classes = []
-            for class_name, count in class_distribution.items():
-                ratio = count / avg_count if avg_count > 0 else 0
-                if ratio < self.CLASS_IMBALANCE_RATIO:
-                    imbalanced_classes.append((class_name, count, ratio))
-            
-            if imbalanced_classes:
-                for class_name, count, ratio in imbalanced_classes:
+        # Analyze class distribution after projected exclusions and optionally auto-balance.
+        if len(class_distribution) > 1:
+            projected_distribution = {
+                class_name: max(0, count)
+                for class_name, count in class_distribution.items()
+            }
+            for excluded in excluded_images:
+                class_name = excluded.get('class')
+                if class_name in projected_distribution:
+                    projected_distribution[class_name] = max(
+                        0, projected_distribution[class_name] - 1
+                    )
+
+            non_empty_distribution = {
+                class_name: count
+                for class_name, count in projected_distribution.items()
+                if count > 0
+            }
+
+            if len(non_empty_distribution) > 1:
+                counts = list(non_empty_distribution.values())
+                min_count = min(counts)
+                max_count = max(counts)
+
+                if max_count - min_count > self.BALANCE_TOLERANCE:
+                    if balance_strategy == 'undersample':
+                        target_count = min_count
+                    elif balance_strategy == 'oversample':
+                        target_count = max_count
+                    else:
+                        target_count = max(1, int(round(float(np.median(counts)))))
+
                     issues.append({
                         'type': 'class_imbalance',
                         'severity': 'high',
-                        'description': f'Class "{class_name}" is under-represented ({count} images, {ratio*100:.1f}% of average)',
-                        'affected_count': count
+                        'description': (
+                            f'Classes are imbalanced after cleaning '
+                            f'(min={min_count}, max={max_count}, target={target_count})'
+                        ),
+                        'affected_count': max_count - min_count
                     })
-                    decisions.append(f'Class "{class_name}" is under-represented → recommend manual oversampling')
-                    # Note: We don't auto-fix class imbalance, only recommend
-                    action_plan.append(f"RECOMMENDATION: Apply oversampling for class '{class_name}' (manual action required)")
+
+                    if auto_balance:
+                        decisions.append(
+                            f'Class imbalance detected -> auto-balancing dataset with {balance_strategy} strategy'
+                        )
+                        action_plan.append(
+                            f"Balance dataset automatically using {balance_strategy} strategy to target {target_count} images per class"
+                        )
+                        actions.append({
+                            'type': 'balance_dataset',
+                            'strategy': balance_strategy,
+                            'target_count': target_count,
+                            'projected_distribution': non_empty_distribution,
+                            'reason': (
+                                f'Class imbalance detected after quality fixes - '
+                                f'balancing cleaned dataset to {target_count} images per class'
+                            )
+                        })
+                    else:
+                        decisions.append(
+                            f'Class imbalance detected -> recommend running auto-balance ({balance_strategy})'
+                        )
+                        action_plan.append(
+                            f"RECOMMENDATION: Re-run with --fix --balance --balance-strategy {balance_strategy}"
+                        )
         
         # Track images that are kept unchanged (good quality)
         excluded_set = set([ex['image_index'] for ex in excluded_images])

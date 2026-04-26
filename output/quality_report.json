@@ -1,63 +1,63 @@
 {
-  "timestamp": "2026-01-20T22:49:07.332915",
+  "timestamp": "2026-04-27T01:39:12.227625",
   "dataset": {
-    "path": "D:\\Asad Jajja\\CV Project\\agentic-data-quality-auditor-cv\\dataset",
-    "total_images": 4822,
+    "path": "./dataset",
+    "total_images": 16522,
     "num_classes": 2,
     "class_distribution": {
-      "happy": 860,
-      "sad": 1551
+      "Happy": 3490,
+      "Sad": 4771
     }
   },
   "metrics": {
     "blur": {
-      "mean": 21.90001821385432,
-      "std": 32.259253059867824,
-      "min": 3.0108256294348994,
-      "max": 552.8904598634077,
-      "median": 12.40160013943203
+      "mean": 537.5708606775887,
+      "std": 673.5265581470776,
+      "min": 3.9433203951014626,
+      "max": 11012.351843042703,
+      "median": 314.78180001388733
     },
     "noise": {
-      "mean": 4.778575453128957,
-      "std": 1.6804152125225635,
-      "min": 1.8126625675446943,
-      "max": 15.846456450865938,
-      "median": 4.377196719778378
+      "mean": 10.005827591894205,
+      "std": 4.10571387213077,
+      "min": 2.2109620251603306,
+      "max": 38.647866302435986,
+      "median": 9.456075097420745
     },
     "brightness": {
-      "mean": 126.48964992045916,
-      "std": 34.3687052130401,
-      "min": 50.579320790816325,
-      "max": 200.03507653061226,
-      "median": 126.69208386479592
+      "mean": 108.70442464507744,
+      "std": 31.029575890974755,
+      "min": 26.80598294005102,
+      "max": 199.43963249362244,
+      "median": 107.44050940688776
     },
     "contrast": {
-      "mean": 49.21148476828283,
-      "std": 16.481437539620877,
-      "min": 8.989908151518717,
-      "max": 113.2818767883039,
-      "median": 45.38717692661799
+      "mean": 60.33264851829103,
+      "std": 14.94080825276589,
+      "min": 21.74970296456497,
+      "max": 117.37270237582571,
+      "median": 59.401521910316106
     },
     "saturation": {
-      "mean": 92.52639266397792,
-      "std": 46.35584424952266,
-      "min": 1.1648995535714286,
-      "max": 202.34733737244898,
-      "median": 93.86019212372449
+      "mean": 90.66900431797107,
+      "std": 32.78651119050041,
+      "min": 0.15351961096938777,
+      "max": 214.2708067602041,
+      "median": 87.81098533163265
     },
     "edge_density": {
-      "mean": 33.7543477149347,
-      "std": 11.279692099164071,
-      "min": 4.9434948593699755,
-      "max": 116.12472653382397,
-      "median": 31.828483183780104
+      "mean": 47.870893609980165,
+      "std": 14.58348962164362,
+      "min": 14.779969394019984,
+      "max": 156.2530494968101,
+      "median": 45.71527720140681
     },
     "sharpness": {
-      "mean": 21.90001821385432,
-      "std": 32.259253059867824,
-      "min": 3.0108256294348994,
-      "max": 552.8904598634077,
-      "median": 12.40160013943203
+      "mean": 537.5708606775887,
+      "std": 673.5265581470776,
+      "min": 3.9433203951014626,
+      "max": 11012.351843042703,
+      "median": 314.78180001388733
     },
     "corruption": {
       "corrupted_count": 0,
@@ -65,202 +65,210 @@
     }
   },
   "agent_analysis": {
-    "summary": "Detected 9 issue(s):\n  1. [CRITICAL] 848 images are severely blurred and will be excluded\n  2. [MEDIUM] 784 images are noisy (24.1%)\n  3. [MEDIUM] 67 images are too dark (3.4%)\n  4. [MEDIUM] 186 images are too bright (6.1%)\n  5. [MEDIUM] 229 images have low contrast (15.3%)\n  6. [MEDIUM] 109 images have high contrast (3.5%)\n  7. [MEDIUM] 1547 images are over-sharpened (47.5%)\n  8. [LOW] 590 images are under-saturated\n  9. [MEDIUM] 72 images are over-saturated\n\n⚠ 848 images will be EXCLUDED from cleaned dataset (irreversible defects)",
+    "summary": "Detected 10 issue(s):\n  1. [CRITICAL] 1439 images are severely blurred and will be excluded\n  2. [MEDIUM] 163 images are noisy (1.7%)\n  3. [MEDIUM] 173 images are too dark (2.0%)\n  4. [MEDIUM] 25 images are too bright (0.3%)\n  5. [MEDIUM] 176 images have low contrast (2.1%)\n  6. [MEDIUM] 279 images have high contrast (3.1%)\n  7. [MEDIUM] 1942 images are over-sharpened (20.0%)\n  8. [LOW] 431 images are under-saturated\n  9. [MEDIUM] 32 images are over-saturated\n  10. [HIGH] Classes are imbalanced after cleaning (min=3490, max=4771, target=4130)\n\n⚠ 1439 images will be EXCLUDED from cleaned dataset (irreversible defects)",
     "issues": [
       {
         "type": "blur_severe",
         "severity": "critical",
-        "description": "848 images are severely blurred and will be excluded",
-        "affected_count": 848
+        "description": "1439 images are severely blurred and will be excluded",
+        "affected_count": 1439
       },
       {
         "type": "noise",
         "severity": "medium",
-        "description": "784 images are noisy (24.1%)",
-        "affected_count": 784
+        "description": "163 images are noisy (1.7%)",
+        "affected_count": 163
       },
       {
         "type": "brightness_dark",
         "severity": "medium",
-        "description": "67 images are too dark (3.4%)",
-        "affected_count": 67
+        "description": "173 images are too dark (2.0%)",
+        "affected_count": 173
       },
       {
         "type": "brightness_bright",
         "severity": "medium",
-        "description": "186 images are too bright (6.1%)",
-        "affected_count": 186
+        "description": "25 images are too bright (0.3%)",
+        "affected_count": 25
       },
       {
         "type": "contrast_low",
         "severity": "medium",
-        "description": "229 images have low contrast (15.3%)",
-        "affected_count": 229
+        "description": "176 images have low contrast (2.1%)",
+        "affected_count": 176
       },
       {
         "type": "contrast_high",
         "severity": "medium",
-        "description": "109 images have high contrast (3.5%)",
-        "affected_count": 109
+        "description": "279 images have high contrast (3.1%)",
+        "affected_count": 279
       },
       {
         "type": "sharpness",
         "severity": "medium",
-        "description": "1547 images are over-sharpened (47.5%)",
-        "affected_count": 1547
+        "description": "1942 images are over-sharpened (20.0%)",
+        "affected_count": 1942
       },
       {
         "type": "low_saturation",
         "severity": "low",
-        "description": "590 images are under-saturated",
-        "affected_count": 590
+        "description": "431 images are under-saturated",
+        "affected_count": 431
       },
       {
         "type": "high_saturation",
         "severity": "medium",
-        "description": "72 images are over-saturated",
-        "affected_count": 72
+        "description": "32 images are over-saturated",
+        "affected_count": 32
+      },
+      {
+        "type": "class_imbalance",
+        "severity": "high",
+        "description": "Classes are imbalanced after cleaning (min=3490, max=4771, target=4130)",
+        "affected_count": 1281
       }
     ],
     "decisions": [
-      "848 severely blurred images → EXCLUDING from cleaned dataset (blur is irreversible)",
-      "784 images are noisy → applying conservative denoising",
-      "67 images too dark → applying brightness normalization",
-      "186 images too bright → applying brightness normalization",
-      "229 images have low contrast → applying CLAHE enhancement",
-      "109 images have high contrast → applying contrast reduction",
-      "1547 images are over-sharpened → applying Gaussian smoothing",
-      "590 images are under-saturated → increasing saturation",
-      "72 images are over-saturated → reducing saturation"
+      "1439 severely blurred images → EXCLUDING from cleaned dataset (blur is irreversible)",
+      "163 images are noisy → applying conservative denoising",
+      "173 images too dark → applying brightness normalization",
+      "25 images too bright → applying brightness normalization",
+      "176 images have low contrast → applying CLAHE enhancement",
+      "279 images have high contrast → applying contrast reduction",
+      "1942 images are over-sharpened → applying Gaussian smoothing",
+      "431 images are under-saturated → increasing saturation",
+      "32 images are over-saturated → reducing saturation",
+      "Class imbalance detected -> recommend running auto-balance (hybrid)"
     ],
     "action_plan": [
-      "EXCLUDE 848 blurry images (blur score < 100.0)",
-      "Apply conservative bilateral denoising to 784 noisy images",
-      "Normalize brightness to 128.0 for 67 dark images",
-      "Normalize brightness to 128.0 for 186 bright images",
-      "Apply CLAHE contrast enhancement to 229 images",
-      "Reduce contrast for 109 images",
-      "Normalize sharpness for 1547 over-sharpened images",
-      "Increase saturation for 590 under-saturated images",
-      "Reduce saturation for 72 over-saturated images"
+      "EXCLUDE 1439 blurry images (blur score < 100.0)",
+      "Apply conservative bilateral denoising to 163 noisy images",
+      "Normalize brightness to 128.0 for 173 dark images",
+      "Normalize brightness to 128.0 for 25 bright images",
+      "Apply CLAHE contrast enhancement to 176 images",
+      "Reduce contrast for 279 images",
+      "Normalize sharpness for 1942 over-sharpened images",
+      "Increase saturation for 431 under-saturated images",
+      "Reduce saturation for 32 over-saturated images",
+      "RECOMMENDATION: Re-run with --fix --balance --balance-strategy hybrid"
     ]
   },
   "fixes": {
-    "images_fixed": 1984
+    "images_fixed": 2689
   },
   "before_after_comparison": {
     "before": {
       "metrics": {
         "blur": {
-          "mean": 2074.3489783322734,
-          "std": 4899.005040250293,
-          "min": 1.66406751,
-          "max": 92181.95250336001,
-          "median": 435.40593271000006
+          "mean": 354.8954787260053,
+          "std": 583.8369201194463,
+          "min": 0.0,
+          "max": 9235.6009871658,
+          "median": 158.61904867454743
         },
         "noise": {
-          "mean": 14.351637748982503,
-          "std": 10.285762213957847,
-          "min": 1.223415495631609,
-          "max": 92.5826640084858,
-          "median": 11.573740008634662
+          "mean": 8.125144250899725,
+          "std": 4.2638299311747225,
+          "min": 0.0,
+          "max": 35.03898826574139,
+          "median": 7.221896499623902
         },
         "brightness": {
-          "mean": 124.03099113224916,
-          "std": 45.292625517863925,
-          "min": 20.499,
-          "max": 253.716,
-          "median": 121.2112
+          "mean": 114.95121112806696,
+          "std": 30.907500172532,
+          "min": 0.0,
+          "max": 227.04218994140626,
+          "median": 114.91791711186477
         },
         "contrast": {
-          "mean": 46.862706748255874,
-          "std": 16.368965737788184,
-          "min": 9.404285933020114,
-          "max": 108.4986421059729,
-          "median": 45.46195890797052
+          "mean": 55.8732604650973,
+          "std": 12.867125573963204,
+          "min": 0.0,
+          "max": 108.24503636030344,
+          "median": 55.758377423246145
         },
         "saturation": {
-          "mean": 83.65315305308378,
-          "std": 58.61440927621907,
+          "mean": 93.43107201847769,
+          "std": 36.09897561151548,
           "min": 0.0,
-          "max": 254.7625,
-          "median": 83.3275
+          "max": 248.95656013385613,
+          "median": 93.56389620582291
         },
         "edge_density": {
-          "mean": 71.21491006769587,
-          "std": 33.651540246609066,
-          "min": 6.918430478650879,
-          "max": 276.9268801337648,
-          "median": 66.7325790581211
+          "mean": 40.9379716972283,
+          "std": 20.000911356119627,
+          "min": 0.0,
+          "max": 178.28042448771657,
+          "median": 36.904570718308946
         },
         "sharpness": {
-          "mean": 2074.3489783322734,
-          "std": 4899.005040250293,
-          "min": 1.66406751,
-          "max": 92181.95250336001,
-          "median": 435.40593271000006
+          "mean": 354.8954787260053,
+          "std": 583.8369201194463,
+          "min": 0.0,
+          "max": 9235.6009871658,
+          "median": 158.61904867454743
         },
         "corruption": {
-          "corrupted_count": 0,
-          "corrupted_percentage": 0.0
+          "corrupted_count": 1,
+          "corrupted_percentage": 0.010309278350515464
         }
       },
       "class_distribution": {
-        "happy": 1280,
-        "sad": 1979
+        "Happy": 4929,
+        "Sad": 4771
       },
-      "total_images": 3259
+      "total_images": 9700
     },
     "after": {
       "metrics": {
         "blur": {
-          "mean": 21.90001821385432,
-          "std": 32.259253059867824,
-          "min": 3.0108256294348994,
-          "max": 552.8904598634077,
-          "median": 12.40160013943203
+          "mean": 537.5708606775887,
+          "std": 673.5265581470776,
+          "min": 3.9433203951014626,
+          "max": 11012.351843042703,
+          "median": 314.78180001388733
         },
         "noise": {
-          "mean": 4.778575453128957,
-          "std": 1.6804152125225635,
-          "min": 1.8126625675446943,
-          "max": 15.846456450865938,
-          "median": 4.377196719778378
+          "mean": 10.005827591894205,
+          "std": 4.10571387213077,
+          "min": 2.2109620251603306,
+          "max": 38.647866302435986,
+          "median": 9.456075097420745
         },
         "brightness": {
-          "mean": 126.48964992045916,
-          "std": 34.3687052130401,
-          "min": 50.579320790816325,
-          "max": 200.03507653061226,
-          "median": 126.69208386479592
+          "mean": 108.70442464507744,
+          "std": 31.029575890974755,
+          "min": 26.80598294005102,
+          "max": 199.43963249362244,
+          "median": 107.44050940688776
         },
         "contrast": {
-          "mean": 49.21148476828283,
-          "std": 16.481437539620877,
-          "min": 8.989908151518717,
-          "max": 113.2818767883039,
-          "median": 45.38717692661799
+          "mean": 60.33264851829103,
+          "std": 14.94080825276589,
+          "min": 21.74970296456497,
+          "max": 117.37270237582571,
+          "median": 59.401521910316106
         },
         "saturation": {
-          "mean": 92.52639266397792,
-          "std": 46.35584424952266,
-          "min": 1.1648995535714286,
-          "max": 202.34733737244898,
-          "median": 93.86019212372449
+          "mean": 90.66900431797107,
+          "std": 32.78651119050041,
+          "min": 0.15351961096938777,
+          "max": 214.2708067602041,
+          "median": 87.81098533163265
         },
         "edge_density": {
-          "mean": 33.7543477149347,
-          "std": 11.279692099164071,
-          "min": 4.9434948593699755,
-          "max": 116.12472653382397,
-          "median": 31.828483183780104
+          "mean": 47.870893609980165,
+          "std": 14.58348962164362,
+          "min": 14.779969394019984,
+          "max": 156.2530494968101,
+          "median": 45.71527720140681
         },
         "sharpness": {
-          "mean": 21.90001821385432,
-          "std": 32.259253059867824,
-          "min": 3.0108256294348994,
-          "max": 552.8904598634077,
-          "median": 12.40160013943203
+          "mean": 537.5708606775887,
+          "std": 673.5265581470776,
+          "min": 3.9433203951014626,
+          "max": 11012.351843042703,
+          "median": 314.78180001388733
         },
         "corruption": {
           "corrupted_count": 0,
@@ -268,28 +276,28 @@
         }
       },
       "class_distribution": {
-        "happy": 860,
-        "sad": 1551
+        "Happy": 3490,
+        "Sad": 4771
       },
-      "total_images": 4822
+      "total_images": 16522
     },
     "improvements": {
       "blur": {
-        "before": 2074.3489783322734,
-        "after": 21.90001821385432,
-        "improvement_percent": -98.94424619759683
+        "before": 354.8954787260053,
+        "after": 537.5708606775887,
+        "improvement_percent": 51.47300906941582
       },
       "noise": {
-        "before": 14.351637748982503,
-        "after": 4.778575453128957,
-        "improvement_percent": 66.70362270349428
+        "before": 8.125144250899725,
+        "after": 10.005827591894205,
+        "improvement_percent": -23.146460947893026
       },
       "brightness": {
-        "before": 124.03099113224916,
-        "after": 126.48964992045916,
+        "before": 114.95121112806696,
+        "after": 108.70442464507744,
         "target": 128.0,
-        "deviation_before": 3.969008867750844,
-        "deviation_after": 1.5103500795408422
+        "deviation_before": 13.048788871933041,
+        "deviation_after": 19.295575354922562
       }
     }
   }

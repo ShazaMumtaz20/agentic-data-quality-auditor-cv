@@ -7,12 +7,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
+from torchvision import transforms, models
 import numpy as np
 from pathlib import Path
 from typing import Dict, Tuple
 import cv2
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import classification_report, confusion_matrix, f1_score, precision_score, recall_score
 import time
 
 
@@ -127,6 +127,66 @@ class SimpleCNN(nn.Module):
         return x
 
 
+class ResNetModel(nn.Module):
+    def __init__(self, num_classes):
+        super(ResNetModel, self).__init__()
+        self.model = models.resnet18(pretrained=True)
+        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class EfficientNetModel(nn.Module):
+    def __init__(self, num_classes):
+        super(EfficientNetModel, self).__init__()
+        self.model = models.efficientnet_b0(pretrained=True)
+        self.model.classifier[1] = nn.Linear(
+            self.model.classifier[1].in_features, num_classes
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class ConvNeXtModel(nn.Module):
+    def __init__(self, num_classes):
+        super(ConvNeXtModel, self).__init__()
+        self.model = models.convnext_tiny(weights=models.ConvNeXt_Tiny_Weights.DEFAULT)
+        self.model.classifier[2] = nn.Linear(
+            self.model.classifier[2].in_features, num_classes
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class RegNetModel(nn.Module):
+    def __init__(self, num_classes):
+        super(RegNetModel, self).__init__()
+        self.model = models.regnet_y_400mf(weights=models.RegNet_Y_400MF_Weights.DEFAULT)
+        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class NFNetModel(nn.Module):
+    def __init__(self, num_classes):
+        super(NFNetModel, self).__init__()
+        try:
+            import timm
+        except ImportError as exc:
+            raise ImportError(
+                "NFNet requires the optional 'timm' package. Install it with: pip install timm"
+            ) from exc
+
+        self.model = timm.create_model('nfnet_f0', pretrained=True, num_classes=num_classes)
+
+    def forward(self, x):
+        return self.model(x)
+
+
 class ModelEvaluator:
     """
     Evaluates model performance on cleaned vs uncleaned datasets.
@@ -145,9 +205,25 @@ class ModelEvaluator:
         self.device = torch.device(device)
         print(f"Using device: {self.device}")
 
+    def _create_model(self, model_type: str, num_classes: int) -> nn.Module:
+        """Create the requested evaluation model."""
+        if model_type == "cnn":
+            return SimpleCNN(num_classes=num_classes)
+        if model_type == "resnet":
+            return ResNetModel(num_classes)
+        if model_type == "efficientnet":
+            return EfficientNetModel(num_classes)
+        if model_type == "convnext":
+            return ConvNeXtModel(num_classes)
+        if model_type == "regnet":
+            return RegNetModel(num_classes)
+        if model_type == "nfnet":
+            return NFNetModel(num_classes)
+        raise ValueError(f"Invalid model type: {model_type}")
+
     
     def train_model(self, dataset_path: str, num_epochs: int = 5, 
-                   batch_size: int = 32, learning_rate: float = 0.001) -> Dict:
+                   batch_size: int = 32, learning_rate: float = 0.001, model_type: str = "cnn") -> Dict:
         """
         Train a lightweight model on the dataset.
         
@@ -156,6 +232,7 @@ class ModelEvaluator:
             num_epochs: Number of training epochs
             batch_size: Batch size for training
             learning_rate: Learning rate
+            model_type: Type of architecture to use
             
         Returns:
             Dictionary with training results and metrics
@@ -188,7 +265,9 @@ class ModelEvaluator:
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
         
         # Create model
-        model = SimpleCNN(num_classes=num_classes).to(self.device)
+        model = self._create_model(model_type=model_type, num_classes=num_classes)
+
+        model = model.to(self.device)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         
@@ -197,6 +276,10 @@ class ModelEvaluator:
         train_losses = []
         train_accuracies = []
         
+        best_loss = float('inf')
+        patience = 10
+        counter = 0
+
         for epoch in range(num_epochs):
             model.train()
             running_loss = 0.0
@@ -227,6 +310,16 @@ class ModelEvaluator:
             train_losses.append(epoch_loss)
             train_accuracies.append(epoch_acc)
             
+            if epoch_loss < best_loss:
+                best_loss = epoch_loss
+                counter = 0
+            else:
+                counter += 1
+
+            if counter >= patience:
+                print("Early stopping triggered")
+                break
+
             print(f"    Epoch {epoch+1}/{num_epochs}: Loss={epoch_loss:.4f}, Acc={epoch_acc:.2f}%")
         
         # Evaluation
@@ -260,12 +353,23 @@ class ModelEvaluator:
             output_dict=True,
             zero_division=0
         )
+        conf_matrix = confusion_matrix(all_labels, all_preds).tolist()
+        macro_f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+        macro_precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+        macro_recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
         
         print(f"  Test Accuracy: {test_accuracy:.2f}%")
+        print(f"  Macro F1: {macro_f1:.4f}")
+        print(f"  Confusion Matrix: {conf_matrix}")
         
         return {
             'success': True,
+            'model_type': model_type,
             'test_accuracy': test_accuracy,
+            'macro_f1': macro_f1,
+            'macro_precision': macro_precision,
+            'macro_recall': macro_recall,
+            'confusion_matrix': conf_matrix,
             'train_accuracies': train_accuracies,
             'train_losses': train_losses,
             'num_classes': num_classes,
@@ -275,7 +379,8 @@ class ModelEvaluator:
         }
     
     def compare_datasets(self, original_path: str, cleaned_path: str,
-                        num_epochs: int = 5, batch_size: int = 32) -> Dict:
+                    num_epochs: int = 5, batch_size: int = 32,
+                    model_type: str = "cnn") -> Dict:
         """
         Compare model performance on original vs cleaned datasets.
         
@@ -294,7 +399,7 @@ class ModelEvaluator:
         
         # Train on original dataset
         print("\n[1/2] Training on ORIGINAL (uncleaned) dataset...")
-        original_results = self.train_model(original_path, num_epochs, batch_size)
+        original_results = self.train_model(original_path, num_epochs, batch_size, model_type=model_type)
         
         if not original_results['success']:
             return {
@@ -304,7 +409,7 @@ class ModelEvaluator:
         
         # Train on cleaned dataset
         print("\n[2/2] Training on CLEANED dataset...")
-        cleaned_results = self.train_model(cleaned_path, num_epochs, batch_size)
+        cleaned_results = self.train_model(cleaned_path, num_epochs, batch_size, model_type=model_type)
         
         if not cleaned_results['success']:
             return {
@@ -322,9 +427,13 @@ class ModelEvaluator:
         print(f"Original Dataset:")
         print(f"  Images: {original_results['num_images']}")
         print(f"  Test Accuracy: {original_results['test_accuracy']:.2f}%")
+        print(f"  Macro F1: {original_results['macro_f1']:.4f}")
+        print(f"  Confusion Matrix: {original_results['confusion_matrix']}")
         print(f"\nCleaned Dataset:")
         print(f"  Images: {cleaned_results['num_images']}")
         print(f"  Test Accuracy: {cleaned_results['test_accuracy']:.2f}%")
+        print(f"  Macro F1: {cleaned_results['macro_f1']:.4f}")
+        print(f"  Confusion Matrix: {cleaned_results['confusion_matrix']}")
         print(f"\nImprovement:")
         print(f"  Accuracy: {original_results['test_accuracy']:.2f}% → {cleaned_results['test_accuracy']:.2f}%")
         print(f"  Improvement: {accuracy_improvement:+.2f}% ({improvement_percent:+.1f}% relative)")
