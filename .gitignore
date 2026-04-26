@@ -19,9 +19,12 @@ cleaned_dataset/
 # ===============================
 __pycache__/
 *.pyc
+venv/
 
 # ===============================
 # OS files
 # ===============================
 Thumbs.db
 .DS_Store
+config.bat
+node_modules
