@@ -1,0 +1,31 @@
+# ===============================
+# Data (VERY IMPORTANT)
+# ===============================
+data/
+dataset/
+datasets/
+images/
+raw_data/
+processed_data/
+cleaned_dataset/
+balanced_dataset/
+cleaned_dataset/
+output/
+results/
+# ===============================
+# Jupyter Notebooks
+# ===============================
+.ipynb_checkpoints/
+
+# ===============================
+# Python
+# ===============================
+__pycache__/
+*.pyc
+venv/
+
+# ===============================
+# OS files
+# ===============================
+Thumbs.db
+.DS_Store
