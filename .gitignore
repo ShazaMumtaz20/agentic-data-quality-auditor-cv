@@ -25,3 +25,5 @@ __pycache__/
 # ===============================
 Thumbs.db
 .DS_Store
+config.bat
+node_modules
