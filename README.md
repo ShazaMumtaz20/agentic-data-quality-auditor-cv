@@ -274,5 +274,4 @@ Feel free to extend this project with:
 - More sophisticated preprocessing methods
 - PDF report generation
 - Support for other image formats
-- Batch processing capabilities
 - Advanced augmentation strategies
