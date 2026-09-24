@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import classification_report, confusion_matrix, f1_score, precision_score, recall_score
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from torchvision import models, transforms
 
 
@@ -78,6 +78,18 @@ class ImageDataset(Dataset):
         
         label = self.labels[idx]
         return image, label
+
+
+class ExplicitImageDataset(ImageDataset):
+    """Image dataset with an explicit, identity-preserving file order."""
+
+    def __init__(self, image_paths: list[str], labels: list[int], class_names: list[str]):
+        self.dataset_path = Path('.')
+        self.transform = None
+        self.images = [str(path) for path in image_paths]
+        self.labels = [int(label) for label in labels]
+        self.class_to_idx = {name: index for index, name in enumerate(class_names)}
+        self.idx_to_class = {index: name for index, name in enumerate(class_names)}
 
 
 class SimpleCNN(nn.Module):
@@ -194,13 +206,15 @@ class ModelEvaluator:
     Evaluates model performance on cleaned vs uncleaned datasets.
     """
 
-    def __init__(self, device: str = "cpu"):
+    def __init__(self, device: str | None = None):
         """
         Initialize evaluator.
 
         Args:
-            device: 'cuda' or 'cpu'
+            device: 'cuda' or 'cpu'. If omitted, use CUDA when available.
         """
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cuda" and not torch.cuda.is_available():
             print("CUDA requested but not available; falling back to CPU.")
             device = "cpu"
@@ -304,7 +318,9 @@ class ModelEvaluator:
     def train_model(self, dataset_path: str, num_epochs: int = 5,
                    batch_size: int = 32, learning_rate: float = 0.001, model_type: str = "cnn",
                    early_stopping_patience: int = 5, early_stopping_min_delta: float = 0.0,
-                   validation_ratio: float = 0.2, early_stopping_metric: str = "accuracy") -> Dict:
+                   validation_ratio: float = 0.2, early_stopping_metric: str = "accuracy",
+                   split_info_path: str | None = None,
+                   reference_dataset_path: str | None = None) -> Dict:
         """
         Train a lightweight model on the dataset.
         
@@ -324,8 +340,48 @@ class ModelEvaluator:
         """
         print(f"\nTraining model on: {dataset_path}")
         
-        # Create dataset
-        dataset = ImageDataset(dataset_path)
+        fixed_split = None
+        identity_paths = None
+        if split_info_path is not None:
+            with open(split_info_path, 'r', encoding='utf-8') as handle:
+                fixed_split = json.load(handle)
+
+            reference_root = Path(reference_dataset_path or dataset_path).resolve()
+            stage_root = Path(dataset_path).resolve()
+            class_names = sorted(path.name for path in reference_root.iterdir() if path.is_dir())
+            split_names = ('train_pool', 'calibration_set', 'held_out_test_set')
+            split_identity_paths = [fixed_split.get(name, []) for name in split_names]
+            identity_paths = [path for paths in split_identity_paths for path in paths]
+            stage_paths = []
+            labels = []
+            split_counts = []
+            for split_name, split_paths in zip(split_names, split_identity_paths):
+                split_count = 0
+                for identity in split_paths:
+                    identity_path = Path(identity)
+                    if identity_path.is_absolute():
+                        relative_path = identity_path.relative_to(reference_root)
+                    elif identity_path.parts and identity_path.parts[0] == reference_root.name:
+                        relative_path = Path(*identity_path.parts[1:])
+                    else:
+                        relative_path = identity_path
+                    original_path = reference_root / relative_path
+                    stage_path = stage_root / relative_path
+                    if stage_path.exists():
+                        selected_path = stage_path
+                    elif split_name == 'held_out_test_set':
+                        # Preserve the fixed test identity when preprocessing removed its stage file.
+                        selected_path = original_path
+                    else:
+                        # Excluded training/calibration images must not be reintroduced from the source.
+                        continue
+                    stage_paths.append(str(selected_path))
+                    labels.append(class_names.index(relative_path.parts[0]))
+                    split_count += 1
+                split_counts.append(split_count)
+            dataset = ExplicitImageDataset(stage_paths, labels, class_names)
+        else:
+            dataset = ImageDataset(dataset_path)
         
         if len(dataset) == 0:
             return {
@@ -338,29 +394,40 @@ class ModelEvaluator:
             raise ValueError("early_stopping_metric must be one of: 'loss', 'accuracy', 'both'")
         
         num_classes = len(dataset.class_to_idx)
-        print(f"  Dataset: {len(dataset)} images, {num_classes} classes")
+        print(f"  Dataset: {len(dataset)} available images, {num_classes} classes")
         print(f"  Classes: {list(dataset.class_to_idx.keys())}")
         
-        # Split dataset into train/validation/test so early stopping monitors a held-out signal.
-        train_pool_size = int(0.8 * len(dataset))
-        test_size = len(dataset) - train_pool_size
-        train_pool, test_dataset = torch.utils.data.random_split(
-            dataset, [train_pool_size, test_size],
-            generator=torch.Generator().manual_seed(42)  # For reproducibility
-        )
-
-        if len(train_pool) > 1 and validation_ratio > 0:
-            val_size = max(1, int(round(len(train_pool) * validation_ratio)))
-            if val_size >= len(train_pool):
-                val_size = len(train_pool) - 1
-            train_size = len(train_pool) - val_size
-            train_dataset, val_dataset = torch.utils.data.random_split(
-                train_pool, [train_size, val_size],
-                generator=torch.Generator().manual_seed(43)
-            )
+        # Use the fixed split directly when supplied; otherwise preserve the existing behavior.
+        if fixed_split is not None:
+            train_count, calibration_count, test_count = split_counts
+            if test_count != 960 or len(dataset) != sum(split_counts):
+                raise ValueError(
+                    'Fixed split evaluation must retain all 960 held-out test images'
+                )
+            expected_count = len(dataset)
+            train_dataset = Subset(dataset, range(0, train_count))
+            val_dataset = Subset(dataset, range(train_count, train_count + calibration_count))
+            test_dataset = Subset(dataset, range(train_count + calibration_count, expected_count))
         else:
-            train_dataset = train_pool
-            val_dataset = None
+            train_pool_size = int(0.8 * len(dataset))
+            test_size = len(dataset) - train_pool_size
+            train_pool, test_dataset = torch.utils.data.random_split(
+                dataset, [train_pool_size, test_size],
+                generator=torch.Generator().manual_seed(42)
+            )
+
+            if len(train_pool) > 1 and validation_ratio > 0:
+                val_size = max(1, int(round(len(train_pool) * validation_ratio)))
+                if val_size >= len(train_pool):
+                    val_size = len(train_pool) - 1
+                train_size = len(train_pool) - val_size
+                train_dataset, val_dataset = torch.utils.data.random_split(
+                    train_pool, [train_size, val_size],
+                    generator=torch.Generator().manual_seed(43)
+                )
+            else:
+                train_dataset = train_pool
+                val_dataset = None
         
         # Create data loaders
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -493,8 +560,10 @@ class ModelEvaluator:
         test_total = 0
         all_preds = []
         all_labels = []
-        test_image_paths = [dataset.images[i] for i in test_dataset.indices]
-        test_label_ids = [int(dataset.labels[i]) for i in test_dataset.indices]
+        test_indices = list(test_dataset.indices)
+        test_image_paths = (fixed_split.get('held_out_test_set', [])
+                            if fixed_split is not None else [dataset.images[i] for i in test_indices])
+        test_label_ids = [int(dataset.labels[i]) for i in test_indices]
 
         with torch.no_grad():
             for images, labels in test_loader:
@@ -596,12 +665,38 @@ class ModelEvaluator:
         with open(output_path / file_name, 'w', encoding='utf-8') as handle:
             json.dump(payload, handle, indent=2)
         return payload
+
+    def evaluate_fixed_stage(self, dataset_path: str, stage_name: str,
+                             split_info_path: str = 'results/split_info.json',
+                             reference_dataset_path: str = 'balanced_dataset',
+                             num_epochs: int = 5, batch_size: int = 32,
+                             model_type: str = 'cnn', early_stopping_patience: int = 5,
+                             early_stopping_min_delta: float = 0.0,
+                             validation_ratio: float = 0.2,
+                             early_stopping_metric: str = 'accuracy') -> Dict:
+        """Train and save one stage while preserving the fixed split identities."""
+        result = self.train_model(
+            dataset_path=dataset_path,
+            num_epochs=num_epochs,
+            batch_size=batch_size,
+            model_type=model_type,
+            early_stopping_patience=early_stopping_patience,
+            early_stopping_min_delta=early_stopping_min_delta,
+            validation_ratio=validation_ratio,
+            early_stopping_metric=early_stopping_metric,
+            split_info_path=split_info_path,
+            reference_dataset_path=reference_dataset_path,
+        )
+        if result.get('success'):
+            self.save_prediction_artifact(result, stage_name, output_dir='results')
+        return result
     
     def compare_datasets(self, original_path: str, cleaned_path: str,
                     num_epochs: int = 5, batch_size: int = 32,
                     model_type: str = "cnn", early_stopping_patience: int = 5,
                     early_stopping_min_delta: float = 0.0,
-                    validation_ratio: float = 0.2, early_stopping_metric: str = "accuracy") -> Dict:
+                    validation_ratio: float = 0.2, early_stopping_metric: str = "accuracy",
+                    split_info_path: str | None = None) -> Dict:
         """
         Compare model performance on original vs cleaned datasets.
         
@@ -629,6 +724,8 @@ class ModelEvaluator:
             early_stopping_min_delta=early_stopping_min_delta,
             validation_ratio=validation_ratio,
             early_stopping_metric=early_stopping_metric,
+            split_info_path=split_info_path,
+            reference_dataset_path=original_path if split_info_path else None,
         )
         
         if not original_results['success']:
@@ -648,6 +745,8 @@ class ModelEvaluator:
             early_stopping_min_delta=early_stopping_min_delta,
             validation_ratio=validation_ratio,
             early_stopping_metric=early_stopping_metric,
+            split_info_path=split_info_path,
+            reference_dataset_path=original_path if split_info_path else None,
         )
         
         if not cleaned_results['success']:

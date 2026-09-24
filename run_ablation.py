@@ -8,17 +8,23 @@ No preprocessing, Stage 1, Stage 2, and Stage 3, then writes the comparison arti
 from __future__ import annotations
 
 import csv
+import argparse
 import json
 import math
+import shutil
 from pathlib import Path
 
+import cv2
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
 from data_loader import DataLoader
+from fixer import ImageFixer
 from main import _estimate_stage2_planners, _estimate_stage3_thresholds, _measure_stage1_baseline
+from model_evaluator import ModelEvaluator
+from quality_metrics import QualityMetrics
 
 
 RESULTS_DIR = Path('results')
@@ -40,6 +46,7 @@ def ensure_stage_outputs():
         _estimate_stage2_planners(loader, split_info, output_dir=str(RESULTS_DIR))
     if not stage3_path.exists():
         _estimate_stage3_thresholds(loader, split_info, output_dir=str(RESULTS_DIR))
+    return split_info
 
 
 def _load_json(path: Path):
@@ -54,6 +61,118 @@ def _safe_float(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _relative_dataset_path(path, dataset_root=DATASET_PATH):
+    path = Path(path)
+    root = Path(dataset_root)
+    if path.parts and path.parts[0] == root.name:
+        return Path(*path.parts[1:])
+    return path
+
+
+def _apply_stage_operation(image, operation, fixer):
+    if operation == 'denoise':
+        return fixer.denoise_image(image, method='bilateral')
+    if operation == 'sharpen':
+        return fixer.normalize_sharpness(image)
+    if operation == 'brightness':
+        return fixer.normalize_brightness(image, target_brightness=128.0)
+    if operation == 'contrast':
+        return fixer.enhance_contrast(image, method='CLAHE')
+    if operation == 'saturation':
+        return fixer.adjust_saturation(image, factor=0.8)
+    return image
+
+
+def _materialize_stage_dataset(stage_name, split_info, stage2_json, stage3_json):
+    """Create a stage dataset while retaining original paths and untouched test files."""
+    output_dir = Path(f'results/{stage_name}_dataset')
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
+
+    test_paths = set(split_info['held_out_test_set'])
+    all_paths = split_info['train_pool'] + split_info['calibration_set'] + split_info['held_out_test_set']
+    source_loader = DataLoader(DATASET_PATH)
+    source_loader.load_dataset()
+    fixer = ImageFixer(source_loader, output_dir=str(output_dir))
+    stage2_records = {}
+    if stage_name == 'stage_2':
+        for planner_rows in stage2_json.get('planners', {}).values():
+            for record in planner_rows:
+                stage2_records[record.get('image')] = record.get('enhancement_sequence', [])
+
+    metrics = QualityMetrics(source_loader)
+    thresholds = stage3_json.get('thresholds', {})
+    for source_path in all_paths:
+        relative_path = _relative_dataset_path(source_path)
+        input_path = Path(source_path)
+        output_path = output_dir / relative_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if source_path in test_paths:
+            # Preserve the held-out image bytes; evaluation performs only its normal input resize.
+            shutil.copy2(str(input_path), str(output_path))
+            continue
+
+        image = source_loader.load_image(str(input_path))
+
+        operations = []
+        if stage_name == 'stage_2':
+            operations = stage2_records.get(source_path, [])
+        elif stage_name == 'stage_3':
+            blur = metrics.compute_blur_score(image)
+            noise = metrics.compute_noise_score(image)
+            brightness = metrics.compute_brightness(image)
+            contrast = metrics.compute_contrast_score(image)
+            saturation = metrics.compute_saturation_score(image)
+            if blur <= _safe_float(thresholds.get('blur', {}).get('threshold'), 0.0):
+                operations.append('denoise')
+            if noise > _safe_float(thresholds.get('noise', {}).get('threshold'), 0.0):
+                operations.append('denoise')
+            if brightness < 50 or brightness > 200:
+                operations.append('brightness')
+            if contrast < 30:
+                operations.append('contrast')
+            if saturation > 180:
+                operations.append('saturation')
+        for operation in operations:
+            image = _apply_stage_operation(image, operation, fixer)
+
+        image = fixer.resize_image(image, target_size=(224, 224))
+        cv2.imwrite(str(output_path), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+
+    return str(output_dir)
+
+
+def materialize_and_evaluate_stages(split_info, eval_epochs=5, model_type='cnn'):
+    """Materialize and evaluate genuine Stage 2/3 transformations."""
+    stage2_json = _load_json(RESULTS_DIR / 'stage2_ordering.json')
+    stage3_json = _load_json(RESULTS_DIR / 'stage3_thresholds.json')
+    evaluator = ModelEvaluator()
+    for stage_name in ('stage_2', 'stage_3'):
+        dataset_path = _materialize_stage_dataset(stage_name, split_info, stage2_json, stage3_json)
+        result = evaluator.evaluate_fixed_stage(
+            dataset_path=dataset_path,
+            stage_name=stage_name,
+            num_epochs=eval_epochs,
+            model_type=model_type,
+            split_info_path=str(RESULTS_DIR / 'split_info.json'),
+            reference_dataset_path=DATASET_PATH,
+        )
+        if not result.get('success'):
+            raise RuntimeError(f'{stage_name} evaluation failed: {result.get("error", "unknown error")}')
+
+
+def _expected_test_paths():
+    split_info = _load_json(RESULTS_DIR / 'split_info.json')
+    expected = split_info.get('held_out_test_set', [])
+    if len(expected) != 960:
+        raise ValueError(
+            f'results/split_info.json must contain exactly 960 held-out test images (got {len(expected)})'
+        )
+    return expected
 
 
 def _bootstrap_ci(values, confidence=0.95):
@@ -116,9 +235,31 @@ def _compute_mcnemar_p_value(stage_a, stage_b):
 
     correct_a = stage_a_payload.get('correct', [])
     correct_b = stage_b_payload.get('correct', [])
+    image_paths_a = stage_a_payload.get('image_paths', [])
+    image_paths_b = stage_b_payload.get('image_paths', [])
+    labels_a = stage_a_payload.get('true_labels', [])
+    labels_b = stage_b_payload.get('true_labels', [])
 
-    if len(correct_a) != len(correct_b):
-        return 'N/A'
+    if len(correct_a) != 960 or len(correct_b) != 960:
+        raise ValueError(
+            f'McNemar pair {stage_a} vs {stage_b} must contain exactly 960 predictions '
+            f'(got {len(correct_a)} and {len(correct_b)})'
+        )
+    if image_paths_a != image_paths_b:
+        raise ValueError(
+            f'McNemar pair {stage_a} vs {stage_b} has different held-out image identities '
+            'or ordering'
+        )
+    expected_paths = _expected_test_paths()
+    if image_paths_a != expected_paths:
+        raise ValueError(
+            f'McNemar pair {stage_a} vs {stage_b} does not match '
+            'results/split_info.json held_out_test_set'
+        )
+    if labels_a != labels_b:
+        raise ValueError(
+            f'McNemar pair {stage_a} vs {stage_b} has different ground-truth labels'
+        )
 
     b = 0
     c = 0
@@ -369,13 +510,25 @@ def generate_mcnemar_log():
     ]
     log = {}
     available = False
+    prediction_files = []
     for left, right in comparisons:
         value = _compute_mcnemar_p_value(left, right)
         log[f'{left} vs {right}'] = value
         if value != 'N/A':
             available = True
+        for stage_name in (left, right):
+            prediction_path = _prediction_file_for(stage_name)
+            if prediction_path is not None and prediction_path.exists():
+                prediction_files.append(prediction_path.name)
     if not available:
-        log['status'] = 'N/A: no paired classifier predictions are stored for a valid McNemar test'
+        unique_files = sorted(set(prediction_files))
+        if unique_files:
+            log['status'] = (
+                'N/A: prediction artifacts exist, but they are not paired on the same '
+                f'test images; available artifacts: {", ".join(unique_files)}'
+            )
+        else:
+            log['status'] = 'N/A: no classifier prediction artifacts were found'
     else:
         log['status'] = 'computed from paired classifier predictions'
     with open(RESULTS_DIR / 'mcnemar_log.json', 'w', encoding='utf-8') as handle:
@@ -384,7 +537,17 @@ def generate_mcnemar_log():
 
 
 def main():
-    ensure_stage_outputs()
+    parser = argparse.ArgumentParser(description='Run fixed-split CNN ablation evaluation.')
+    parser.add_argument('--eval-epochs', type=int, default=5)
+    parser.add_argument('--model', choices=['cnn'], default='cnn')
+    args = parser.parse_args()
+
+    split_info = ensure_stage_outputs()
+    materialize_and_evaluate_stages(
+        split_info,
+        eval_epochs=args.eval_epochs,
+        model_type=args.model,
+    )
     generate_comparison_table()
     generate_per_fix_ablation()
     generate_chart()

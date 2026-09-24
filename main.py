@@ -697,18 +697,11 @@ def main():
             print()
     
     def ensure_cleaned_dataset_copy(source_dataset: str, target_dir: str = "cleaned_dataset") -> None:
-        """Ensure a populated cleaned dataset exists for evaluation, even when no fixes are applied."""
+        """Rebuild the cleaned dataset so excluded files cannot survive from an earlier run."""
         target_path = Path(target_dir)
-        has_images = False
         if target_path.exists():
-            for child in target_path.rglob('*'):
-                if child.is_file() and child.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}:
-                    has_images = True
-                    break
-        if not target_path.exists() or not has_images:
-            if target_path.exists():
-                shutil.rmtree(target_path)
-            shutil.copytree(source_dataset, target_dir, dirs_exist_ok=True)
+            shutil.rmtree(target_path)
+        shutil.copytree(source_dataset, target_dir)
 
     # Step 5: Apply fixes (if requested)
     fixed_count = 0
@@ -718,11 +711,14 @@ def main():
         try:
             fixer = ImageFixer(data_loader, output_dir="cleaned_dataset")
 
-            # Ensure there is always a cleaned copy available for evaluation and downstream comparison.
-            ensure_cleaned_dataset_copy(args.dataset, "cleaned_dataset")
-
             # Apply fixes based on agent actions
             if 'actions' in agent_analysis and len(agent_analysis['actions']) > 0:
+                # Start empty so excluded images cannot remain from the source or an earlier run.
+                cleaned_path = Path("cleaned_dataset")
+                if cleaned_path.exists():
+                    shutil.rmtree(cleaned_path)
+                cleaned_path.mkdir(parents=True, exist_ok=True)
+
                 fixed_count, skipped, excluded_count, fixes_log = fixer.apply_agent_actions(
                     actions=agent_analysis['actions'],
                     image_paths=metrics_data['image_paths']
@@ -858,6 +854,7 @@ def main():
                 early_stopping_min_delta=args.early_stopping_min_delta,
                 validation_ratio=args.validation_ratio,
                 early_stopping_metric=args.early_stopping_metric,
+                split_info_path='results/split_info.json',
             )
             
             if evaluation_results['success']:
