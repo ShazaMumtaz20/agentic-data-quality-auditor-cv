@@ -619,6 +619,18 @@ def main():
             auto_balance=args.balance,
             balance_strategy=args.balance_strategy
         )
+
+        # Keep the fixed test identities available for a like-for-like
+        # comparison. Training and calibration images may still be excluded.
+        held_out_test_paths = set(split_info.get('held_out_test_set', []))
+        if held_out_test_paths:
+            for action in agent_analysis.get('actions', []):
+                if action.get('type') != 'exclude':
+                    continue
+                action['indices'] = [
+                    index for index in action.get('indices', [])
+                    if metrics_data['image_paths'][index] not in held_out_test_paths
+                ]
         
         print("Agent Summary:")
         safe_print(f"  {agent_analysis['summary']}")

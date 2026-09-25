@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import classification_report, confusion_matrix, f1_score, precision_score, recall_score
-from torch.utils.data import Dataset, DataLoader, Subset
+from torch.utils.data import Dataset, DataLoader, Subset, WeightedRandomSampler
 from torchvision import models, transforms
 
 
@@ -62,6 +62,8 @@ class ImageDataset(Dataset):
         # Load image
         img_path = self.images[idx]
         image = cv2.imread(img_path)
+        if image is None:
+            raise ValueError(f"Could not read image: {img_path}")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         # Resize to 224x224 if needed
@@ -112,8 +114,9 @@ class SimpleCNN(nn.Module):
         # Pooling
         self.pool = nn.MaxPool2d(2, 2)
         
-        # Fully connected layers
-        self.fc1 = nn.Linear(128 * 28 * 28, 256)
+        # Pool spatial features before the classifier to keep the head small.
+        self.feature_pool = nn.AdaptiveAvgPool2d((4, 4))
+        self.fc1 = nn.Linear(128 * 4 * 4, 256)
         self.fc2 = nn.Linear(256, num_classes)
         
         # Dropout
@@ -130,8 +133,9 @@ class SimpleCNN(nn.Module):
         # Conv block 3
         x = self.pool(self.relu(self.bn3(self.conv3(x))))
         
-        # Flatten
-        x = x.view(-1, 128 * 28 * 28)
+        # Flatten pooled features
+        x = self.feature_pool(x)
+        x = x.view(x.size(0), -1)
         
         # FC layers
         x = self.relu(self.fc1(x))
@@ -315,8 +319,8 @@ class ModelEvaluator:
         return min(1.0, float(p_value))
 
     
-    def train_model(self, dataset_path: str, num_epochs: int = 5,
-                   batch_size: int = 32, learning_rate: float = 0.001, model_type: str = "cnn",
+    def train_model(self, dataset_path: str, num_epochs: int = 20,
+                   batch_size: int = 32, learning_rate: float = 0.0001, model_type: str = "cnn",
                    early_stopping_patience: int = 5, early_stopping_min_delta: float = 0.0,
                    validation_ratio: float = 0.2, early_stopping_metric: str = "accuracy",
                    split_info_path: str | None = None,
@@ -339,6 +343,12 @@ class ModelEvaluator:
             Dictionary with training results and metrics
         """
         print(f"\nTraining model on: {dataset_path}")
+
+        # Keep ablation comparisons reproducible and avoid large run-to-run
+        # differences from model initialization and sampler order.
+        torch.manual_seed(42)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(42)
         
         fixed_split = None
         identity_paths = None
@@ -429,8 +439,36 @@ class ModelEvaluator:
                 train_dataset = train_pool
                 val_dataset = None
         
+        # Balance the training batches when a fixed split is used. Cleaning can
+        # remove whole classes unevenly, and plain shuffling then encourages a
+        # CNN to favor the most frequent remaining class.
+        train_sampler = None
+        if fixed_split is not None and len(train_dataset) > 0:
+            train_labels = [dataset.labels[index] for index in train_dataset.indices]
+            class_counts = torch.bincount(
+                torch.tensor(train_labels, dtype=torch.long),
+                minlength=num_classes,
+            ).float()
+            class_weights = torch.zeros_like(class_counts)
+            nonzero = class_counts > 0
+            class_weights[nonzero] = 1.0 / class_counts[nonzero]
+            sample_weights = torch.tensor(
+                [class_weights[label].item() for label in train_labels],
+                dtype=torch.double,
+            )
+            train_sampler = WeightedRandomSampler(
+                sample_weights,
+                num_samples=len(train_dataset),
+                replacement=True,
+            )
+
         # Create data loaders
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=train_sampler is None,
+            sampler=train_sampler,
+        )
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False) if val_dataset is not None else None
         

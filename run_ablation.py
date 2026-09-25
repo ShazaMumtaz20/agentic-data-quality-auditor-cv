@@ -114,6 +114,10 @@ def _materialize_stage_dataset(stage_name, split_info, stage2_json, stage3_json)
         if source_path in test_paths:
             # Preserve the held-out image bytes; evaluation performs only its normal input resize.
             shutil.copy2(str(input_path), str(output_path))
+            if cv2.imread(str(output_path)) is None:
+                shutil.copy2(str(input_path), str(output_path))
+            if cv2.imread(str(output_path)) is None:
+                raise RuntimeError(f'Unreadable held-out image after materialization: {input_path}')
             continue
 
         image = source_loader.load_image(str(input_path))
@@ -141,12 +145,18 @@ def _materialize_stage_dataset(stage_name, split_info, stage2_json, stage3_json)
             image = _apply_stage_operation(image, operation, fixer)
 
         image = fixer.resize_image(image, target_size=(224, 224))
-        cv2.imwrite(str(output_path), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+        written = cv2.imwrite(str(output_path), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+        if not written or cv2.imread(str(output_path)) is None:
+            # Never leave a corrupt stage file in the fixed split. Preserve the
+            # original identity if a transformed write cannot be decoded.
+            shutil.copy2(str(input_path), str(output_path))
+            if cv2.imread(str(output_path)) is None:
+                raise RuntimeError(f'Unreadable image after materialization: {input_path}')
 
     return str(output_dir)
 
 
-def materialize_and_evaluate_stages(split_info, eval_epochs=5, model_type='cnn'):
+def materialize_and_evaluate_stages(split_info, eval_epochs=30, model_type='cnn'):
     """Materialize and evaluate genuine Stage 2/3 transformations."""
     stage2_json = _load_json(RESULTS_DIR / 'stage2_ordering.json')
     stage3_json = _load_json(RESULTS_DIR / 'stage3_thresholds.json')
@@ -157,6 +167,8 @@ def materialize_and_evaluate_stages(split_info, eval_epochs=5, model_type='cnn')
             dataset_path=dataset_path,
             stage_name=stage_name,
             num_epochs=eval_epochs,
+            early_stopping_patience=10,
+            early_stopping_metric='loss',
             model_type=model_type,
             split_info_path=str(RESULTS_DIR / 'split_info.json'),
             reference_dataset_path=DATASET_PATH,
@@ -538,7 +550,7 @@ def generate_mcnemar_log():
 
 def main():
     parser = argparse.ArgumentParser(description='Run fixed-split CNN ablation evaluation.')
-    parser.add_argument('--eval-epochs', type=int, default=5)
+    parser.add_argument('--eval-epochs', type=int, default=30)
     parser.add_argument('--model', choices=['cnn'], default='cnn')
     args = parser.parse_args()
 
