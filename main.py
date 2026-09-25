@@ -155,7 +155,7 @@ def _estimate_stage2_planners(data_loader, split_info, output_dir='results'):
         }
         remaining = state.copy()
         ordered_steps = []
-        for _ in range(len(mapping)):
+        for _ in range(min(3, len(mapping))):
             if not remaining:
                 break
             severity = {metric: _normalize_metric_value(value, metric, std_train.get(metric, 1.0)) for metric, value in remaining.items()}
@@ -175,6 +175,15 @@ def _estimate_stage2_planners(data_loader, split_info, output_dir='results'):
                     remaining[metric_name] = max(0.0, min(120.0, value * 0.9))
                 elif step == 'saturation' and metric_name == 'saturation':
                     remaining[metric_name] = max(0.0, min(200.0, value * 0.9))
+            handled_metrics = {
+                'denoise': {'blur', 'sharpness', 'noise'},
+                'sharpen': {'sharpness'},
+                'brightness': {'brightness'},
+                'contrast': {'contrast'},
+                'saturation': {'saturation'},
+            }
+            for metric_name in handled_metrics[step]:
+                remaining.pop(metric_name, None)
             if all(_normalize_metric_value(value, metric, std_train.get(metric, 1.0)) <= 1.0 for metric, value in remaining.items()):
                 break
         return ordered_steps

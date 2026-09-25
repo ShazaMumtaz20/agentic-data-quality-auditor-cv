@@ -549,9 +549,19 @@ def generate_mcnemar_log():
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run fixed-split CNN ablation evaluation.')
+    parser = argparse.ArgumentParser(description='Run fixed-split model ablation evaluation.')
     parser.add_argument('--eval-epochs', type=int, default=30)
-    parser.add_argument('--model', choices=['cnn'], default='cnn')
+    parser.add_argument(
+        '--model',
+        choices=['cnn', 'resnet'],
+        default='cnn',
+        help='Model architecture used for ablation training.',
+    )
+    parser.add_argument(
+        '--evaluate',
+        action='store_true',
+        help='Compatibility flag; ablation always performs evaluation.',
+    )
     args = parser.parse_args()
 
     split_info = ensure_stage_outputs()
