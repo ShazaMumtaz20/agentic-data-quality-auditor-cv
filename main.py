@@ -3,6 +3,7 @@ Main Entry Point
 Example usage of the Agentic Data Quality Auditor for Computer Vision.
 """
 
+import utils.session
 import argparse
 import csv
 import json
