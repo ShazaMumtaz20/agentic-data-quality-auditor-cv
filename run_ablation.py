@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 import shutil
+from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -42,8 +43,9 @@ def ensure_stage_outputs():
     stage3_path = RESULTS_DIR / 'stage3_thresholds.json'
     if not stage1_path.exists():
         _measure_stage1_baseline(loader, output_dir=str(RESULTS_DIR))
-    if not stage2_path.exists():
-        _estimate_stage2_planners(loader, split_info, output_dir=str(RESULTS_DIR))
+    # Rebuild Stage 2 because planner logic directly controls the materialized
+    # images; reusing an older artifact can preserve unsafe operation sequences.
+    _estimate_stage2_planners(loader, split_info, output_dir=str(RESULTS_DIR))
     if not stage3_path.exists():
         _estimate_stage3_thresholds(loader, split_info, output_dir=str(RESULTS_DIR))
     return split_info
@@ -72,6 +74,9 @@ def _relative_dataset_path(path, dataset_root=DATASET_PATH):
 
 
 def _apply_stage_operation(image, operation, fixer):
+    if operation == 'deblur':
+        blurred = cv2.GaussianBlur(image, (0, 0), 1.2)
+        return cv2.addWeighted(image, 1.5, blurred, -0.5, 0)
     if operation == 'denoise':
         return fixer.denoise_image(image, method='bilateral')
     if operation == 'sharpen':
@@ -85,8 +90,58 @@ def _apply_stage_operation(image, operation, fixer):
     return image
 
 
+def _materialize_single_fix_dataset(fix_name, split_info):
+    """Materialize one isolated fix while preserving the fixed split identities."""
+    output_dir = RESULTS_DIR / f'per_fix_{fix_name.lower().replace(" ", "_")}_dataset'
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
+
+    source_loader = DataLoader(DATASET_PATH)
+    source_loader.load_dataset()
+    metrics = QualityMetrics(source_loader)
+    all_paths = split_info['train_pool'] + split_info['calibration_set'] + split_info['held_out_test_set']
+    test_paths = set(split_info['held_out_test_set'])
+    class_counts = Counter(Path(path).parts[-2] for path in source_loader.image_paths)
+    severe_by_class = Counter()
+    for source_path in all_paths:
+        image = source_loader.load_image(source_path)
+        if metrics.compute_blur_score(image) < 100.0:
+            severe_by_class[Path(source_path).parts[-2]] += 1
+    excluded_classes = {
+        class_name for class_name, severe_count in severe_by_class.items()
+        if severe_count / class_counts[class_name] <= 0.4
+    }
+    operation = {
+        'Deblur only': 'deblur',
+        'Sharpen only': 'sharpen',
+        'Denoise only': 'denoise',
+        'Brightness only': 'brightness',
+        'Contrast only': 'contrast',
+        'Saturation only': 'saturation',
+    }[fix_name]
+    fixer = ImageFixer(source_loader, output_dir=str(output_dir))
+    excluded_count = 0
+    for source_path in all_paths:
+        relative_path = _relative_dataset_path(source_path)
+        input_path = Path(source_path)
+        output_path = output_dir / relative_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        image = source_loader.load_image(str(input_path))
+        class_name = relative_path.parts[0]
+        if source_path not in test_paths and class_name in excluded_classes and metrics.compute_blur_score(image) < 100.0:
+            excluded_count += 1
+            continue
+        image = _apply_stage_operation(image, operation, fixer)
+        image = fixer.resize_image(image, target_size=(224, 224))
+        if not cv2.imwrite(str(output_path), cv2.cvtColor(image, cv2.COLOR_RGB2BGR)):
+            raise RuntimeError(f'Could not write per-fix image: {output_path}')
+    print(f"  {fix_name}: excluded {excluded_count} severe-blur train/calibration images")
+    return str(output_dir)
+
+
 def _materialize_stage_dataset(stage_name, split_info, stage2_json, stage3_json):
-    """Create a stage dataset while retaining original paths and untouched test files."""
+    """Create a stage dataset with the same severe-blur policy as Stage 1."""
     output_dir = Path(f'results/{stage_name}_dataset')
     if output_dir.exists():
         shutil.rmtree(output_dir)
@@ -105,22 +160,32 @@ def _materialize_stage_dataset(stage_name, split_info, stage2_json, stage3_json)
 
     metrics = QualityMetrics(source_loader)
     thresholds = stage3_json.get('thresholds', {})
+    class_counts = Counter(Path(path).parts[-2] for path in source_loader.image_paths)
+    severe_by_class = Counter()
+    for source_path in all_paths:
+        image = source_loader.load_image(source_path)
+        if metrics.compute_blur_score(image) < 100.0:
+            severe_by_class[Path(source_path).parts[-2]] += 1
+    excluded_classes = {
+        class_name
+        for class_name, severe_count in severe_by_class.items()
+        if class_counts[class_name] and severe_count / class_counts[class_name] <= 0.4
+    }
+    excluded_count = 0
     for source_path in all_paths:
         relative_path = _relative_dataset_path(source_path)
         input_path = Path(source_path)
         output_path = output_dir / relative_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if source_path in test_paths:
-            # Preserve the held-out image bytes; evaluation performs only its normal input resize.
-            shutil.copy2(str(input_path), str(output_path))
-            if cv2.imread(str(output_path)) is None:
-                shutil.copy2(str(input_path), str(output_path))
-            if cv2.imread(str(output_path)) is None:
-                raise RuntimeError(f'Unreadable held-out image after materialization: {input_path}')
-            continue
-
         image = source_loader.load_image(str(input_path))
+
+        # Match Stage 1's irreversible-defect rule. Keep the fixed test set
+        # intact, but do not train or calibrate on severely blurred images.
+        class_name = Path(source_path).parts[-2]
+        if source_path not in test_paths and class_name in excluded_classes and metrics.compute_blur_score(image) < 100.0:
+            excluded_count += 1
+            continue
 
         operations = []
         if stage_name == 'stage_2':
@@ -153,6 +218,7 @@ def _materialize_stage_dataset(stage_name, split_info, stage2_json, stage3_json)
             if cv2.imread(str(output_path)) is None:
                 raise RuntimeError(f'Unreadable image after materialization: {input_path}')
 
+    print(f"  {stage_name}: excluded {excluded_count} severe-blur train/calibration images")
     return str(output_dir)
 
 
@@ -422,7 +488,7 @@ def generate_comparison_table():
     return rows
 
 
-def generate_per_fix_ablation():
+def generate_per_fix_ablation(split_info, eval_epochs=30, model_type='cnn'):
     fixes = [
         'Deblur only',
         'Sharpen only',
@@ -440,6 +506,22 @@ def generate_per_fix_ablation():
         no_prep_correct = no_prep_payload.get('correct', [])
         if no_prep_correct:
             no_prep_acc = float(np.mean(no_prep_correct))
+
+    evaluator = ModelEvaluator()
+    for fix_name in fixes:
+        dataset_path = _materialize_single_fix_dataset(fix_name, split_info)
+        result = evaluator.evaluate_fixed_stage(
+            dataset_path=dataset_path,
+            stage_name=fix_name,
+            num_epochs=eval_epochs,
+            early_stopping_patience=10,
+            early_stopping_metric='loss',
+            model_type=model_type,
+            split_info_path=str(RESULTS_DIR / 'split_info.json'),
+            reference_dataset_path=DATASET_PATH,
+        )
+        if not result.get('success'):
+            raise RuntimeError(f'{fix_name} evaluation failed: {result.get("error", "unknown error")}')
 
     rows = []
     for fix_name in fixes:
@@ -571,7 +653,7 @@ def main():
         model_type=args.model,
     )
     generate_comparison_table()
-    generate_per_fix_ablation()
+    generate_per_fix_ablation(split_info, eval_epochs=args.eval_epochs, model_type=args.model)
     generate_chart()
     log = generate_mcnemar_log()
     print('Ablation artifacts generated in results/')
